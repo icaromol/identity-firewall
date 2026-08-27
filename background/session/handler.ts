@@ -1,10 +1,14 @@
-import type { GetOriginStateMessage, GetSessionStateMessage } from '../../shared/messages';
+import type {
+  GetOriginStateMessage,
+  GetSessionStateMessage,
+  OriginSummary,
+} from '../../shared/messages';
 import { normalizeOrigin } from '../../shared/origin';
 import { getSessionState } from './state';
 
-export async function handleGetSessionState(_message: GetSessionStateMessage): Promise<{
-  originsWithForms: Array<{ origin: string; formCount: number; lastDetectedAt: number }>;
-}> {
+export async function handleGetSessionState(
+  _message: GetSessionStateMessage,
+): Promise<{ originsWithForms: OriginSummary[] }> {
   const state = await getSessionState();
   return {
     originsWithForms: Object.entries(state.originForms).map(([origin, record]) => ({

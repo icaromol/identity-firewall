@@ -265,6 +265,47 @@ Not fixed, noted as a deliberate trade-off: the XHTML-document scenario has no d
 - Full implementation: `phase-1-runtime-architecture.md` §5.
 - **Acceptance for M5**: opening the popup on a tab with a detected form shows that origin and form count; opening it on a tab with none shows the empty state; the vault placeholder renders with no console errors.
 
+#### M5 — Implementation (as built)
+
+Status: **implemented, tested, manually verified in real Chrome, committed**.
+
+##### Deviation from the research sketch, and a correction
+
+`phase-1-runtime-architecture.md` §5's sketch put the store at `entrypoints/popup/stores/session.store.ts` (nested) and used bare `chrome.runtime.sendMessage(...)`. Neither was carried forward:
+
+- **Location**: `stores/session.store.ts` is a new **top-level** directory, sibling of `entrypoints/`, `background/`, `content/`, `shared/` — matching this plan's own directory tree (below) and mirroring M4's own precedent exactly: `entrypoints/content.ts` stayed a thin composition root, with the actual testable logic (`extractForms`, `buildFormDetectedMessage`) living in a new top-level `content/formDetection.ts`, not nested inside `entrypoints/content/`. A Pinia store is the same kind of framework-adjacent-but-not-WXT-entrypoint-coupled module; only `App.vue` itself is truly entrypoint-coupled and stays nested.
+- **API convention**: `browser` imported explicitly from `wxt/browser`, matching the M3 correction already documented above — not `chrome.*`.
+
+##### File map
+
+| File | Responsibility |
+|---|---|
+| `stores/session.store.ts` | `useSessionStore` — one action, `fetchSessionState()`, state machine `idle → loading → loaded \| error`. Never reads `browser.storage` directly; only talks to background over the M3 message router. |
+| `entrypoints/popup/App.vue` | `onMounted` triggers the fetch; template renders loading/error/list/empty states plus the static Vault placeholder. |
+
+##### Two failure paths, both land in the same `error` state
+
+`fetchSessionState()` distinguishes a **handler-level failure** (`background/router/dispatch.ts` resolves `{ok:false, error}` — it deliberately never rejects, per its own header comment) from a **transport-level failure** (a rejected `sendMessage` promise — e.g. "Extension context invalidated" after a dev-mode reload). `entrypoints/content.ts` draws this same distinction but has no UI to surface it in, so it swallows the transport case silently; the popup has a UI, so both paths set `status: 'error'` with a message, via an explicit `try/catch` around the `{ok:false}` check.
+
+##### A real TypeScript finding: `fakeBrowser.runtime.sendMessage`'s overloaded type
+
+Planning assumed `browser.runtime.sendMessage`'s resolved type is `any` everywhere (based on `entrypoints/content.ts`'s existing `.then((response: MessageResponse) => ...)` annotation already type-checking). That holds for `browser` imported from `wxt/browser` in production code, but **not** for `fakeBrowser.runtime.sendMessage` directly in test files: `vi.spyOn(fakeBrowser.runtime, 'sendMessage')` infers a `void`-returning overload (inherited from `chrome.runtime.sendMessage`'s classic multi-overload callback-style signature set), unlike single-signature methods such as `storage.session.get` that M3/M4's tests already mock cleanly. Fixed with a narrow, commented `as never` cast on each `mockResolvedValueOnce(...)` call — a test-file-only workaround that doesn't affect the store's own production typing.
+
+##### Test coverage (4 new tests, 37 total)
+
+`tests/unit/stores/session.store.test.ts`: a successful response populates `originsWithForms` and sets `status: 'loaded'`; a `{ok:false}` handler response sets `status: 'error'` with the message; a rejected `sendMessage` promise (transport failure) also lands in `status: 'error'`; and an assertion that `sendMessage` is called with the bare `{type: 'GET_SESSION_STATE'}` payload (no `payload` key), locking in that decision against future drift.
+
+##### Deliberately not automated: the `.vue` template itself
+
+Verified empirically (reading `node_modules/wxt/dist/testing/wxt-vitest-plugin.mjs` and `@wxt-dev/module-vue`'s source, and confirming `@vitejs/plugin-vue` isn't resolvable in this project's `node_modules`) that `WxtVitest()` never wires Vue SFC compilation into the Vitest pipeline — only into WXT's actual build. Testing `App.vue` itself would need two new pieces of infrastructure (`@vitejs/plugin-vue`, `@vue/test-utils`) with zero precedent in this codebase, for a template that's mostly `v-if`/`v-for` over data the store test already covers. Covered instead by manual verification in real Chrome (done together with the user this milestone: visited `github.com/login`, confirmed the popup showed `https://github.com — 1 form(s)` exactly as designed) and, later, M6's Playwright pass, which drives the real built popup HTML at higher fidelity than a jsdom simulation would.
+
+##### Fixes from code review (`/code-review`, 4 findings, all fixed)
+
+- **`shared/messages.ts`/`stores/session.store.ts`/`background/session/handler.ts` — triplicated wire-shape type.** `OriginSummary` (`{origin, formCount, lastDetectedAt}`) was independently declared in the store and inline in the handler's return type, with no shared import linking them — a future field rename on either side would silently drift instead of failing to compile. Fixed by defining `OriginSummary` once in `shared/messages.ts` and importing it in both places; this is a single-package TypeScript program, so despite the wire boundary being untyped JSON at runtime, the two sides now share one compile-time source of truth.
+- **`stores/session.store.ts` — unvalidated response could crash the popup's render.** The response side of the channel isn't Zod-validated the way requests are (only `ExtensionMessageSchema.safeParse` in `dispatch.ts` guards the request side); a shape drift would have left `status: 'loaded'` with `originsWithForms` silently `undefined`, and `App.vue`'s `session.originsWithForms.length` would throw instead of falling into the error state. Fixed with a defensive `Array.isArray(response.data?.originsWithForms) ? ... : []` guard — proportional to Phase 1 (background and the popup are both first-party code, not an adversarial boundary the way site-provided form data is, so a full response schema wasn't judged worth adding yet).
+- **`entrypoints/popup/App.vue` — `'idle'` and empty-`'loaded'` rendered identically.** A broken `onMounted` wiring (fetch never running) would have shown "No forms detected yet this session." — indistinguishable from a genuinely empty, successfully-fetched session. Fixed by merging the `'idle'` status into the same branch as `'loading'` ("Loading…"), so a stuck fetch stays visibly "loading" forever instead of silently masquerading as a real empty result.
+- **`stores/session.store.ts` — non-`Error` rejections lost their diagnostic message.** The `catch` block's fallback was a generic `'Unknown error'` string, discarding whatever the actual rejection value was — inconsistent with `background/router/dispatch.ts`'s own `String(err)` handling of the same situation. Fixed to match: `err instanceof Error ? err.message : String(err)`.
+
 ### M6 — End-to-end test
 
 - Playwright, per WXT's own guidance that it's "the only good option" for this: `chromium.launchPersistentContext('', { channel: 'chromium', args: ['--disable-extensions-except=<path>', '--load-extension=<path>'] })` pointed at the real build output (`.output/chrome-mv3`), not a hand-maintained test fixture extension.

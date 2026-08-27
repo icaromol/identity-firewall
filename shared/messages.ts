@@ -62,3 +62,15 @@ export type ExtensionMessage = z.infer<typeof ExtensionMessageSchema>;
 
 // --- Reply envelope: every handler resolves to exactly one of these ---
 export type MessageResponse<T = unknown> = { ok: true; data: T } | { ok: false; error: string };
+
+// GET_SESSION_STATE's response payload shape (background/session/handler.ts's
+// handleGetSessionState). Named once and imported by both the handler and
+// stores/session.store.ts, rather than each declaring its own copy -- the
+// message channel itself is untyped JSON, but within this single-package
+// TypeScript program a rename here still forces both sides to be updated
+// together at compile time.
+export interface OriginSummary {
+  origin: string;
+  formCount: number;
+  lastDetectedAt: number;
+}
