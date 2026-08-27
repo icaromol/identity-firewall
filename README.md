@@ -12,8 +12,10 @@ This is a personal project, not a company or startup. No cloud backend, no accou
 
 ## Status
 
-Documentation/design stage — no product code yet. The full architecture, threat model,
-data model, and phased roadmap live under [`docs/`](docs/). Start with
+Phase 1 (extension foundation) in progress — see
+[`docs/plans/phase-1-extension-foundation.md`](docs/plans/phase-1-extension-foundation.md)
+for milestone-by-milestone status. The full architecture, threat model, data model, and
+phased roadmap live under [`docs/`](docs/). Start with
 [`docs/product-vision.md`](docs/product-vision.md) for the *why*, and
 [`docs/roadmap.md`](docs/roadmap.md) for the *what's next*.
 
@@ -30,9 +32,22 @@ pnpm dev            # Chrome, with hot reload
 pnpm dev:firefox    # Firefox, with hot reload
 pnpm build          # production build -> .output/
 pnpm compile        # type-check only (vue-tsc)
+pnpm check          # lint + compile + unit tests -- what Husky's pre-commit hook runs
 ```
 
 Load the built extension unpacked: `chrome://extensions` → enable Developer mode → "Load unpacked" → select `.output/chrome-mv3` (or `.output/chrome-mv3-dev` when running via `pnpm dev`). For Firefox: `about:debugging#/runtime/this-firefox` → "Load Temporary Add-on" → select `manifest.json` inside `.output/firefox-mv2`.
+
+### Testing
+
+Unit tests (Vitest, mocking the browser API via `fakeBrowser`) run as part of `pnpm check`.
+End-to-end tests (Playwright, driving the real built extension in an actual Chromium
+instance) are separate — they're slower and need a browser binary not guaranteed present
+on every machine, so they're not part of the pre-commit hook:
+
+```bash
+pnpm exec playwright install chromium   # one-time setup
+pnpm test:e2e                           # builds the extension, then runs tests/e2e/
+```
 
 Recommended IDE setup: [VS Code](https://code.visualstudio.com/) + [Volar](https://marketplace.visualstudio.com/items?itemName=Vue.volar).
 

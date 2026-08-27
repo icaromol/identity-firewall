@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Fixture — login form</title>
+  </head>
+  <body>
+    <!--
+      A login-shaped form: one required email field, one required password
+      field. Served over real HTTP (never file://) by tests/e2e/fixtures/
+      server.ts, since entrypoints/content.ts's manifest `matches` is
+      ['http://*/*', 'https://*/*'] only -- the content script never
+      injects into a file:// page at all.
+    -->
+    <form>
+      <input type="email" name="email" required />
+      <input type="password" name="password" required />
+    </form>
+  </body>
+</html>

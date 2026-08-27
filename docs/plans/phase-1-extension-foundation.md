@@ -314,6 +314,36 @@ Verified empirically (reading `node_modules/wxt/dist/testing/wxt-vitest-plugin.m
 - Explicitly not attempted in Playwright: simulating the exact ~30-second MV3 service-worker idle-kill (Playwright doesn't reliably control this timing) — that property is covered by the manual checklist item in M7 plus the unit-level guarantee that every read/write already goes through `chrome.storage.session` rather than memory (M3).
 - Full implementation shape: `phase-1-tooling-scaffold.md` §9, `phase-1-runtime-architecture.md` §6.
 
+#### M6 — Implementation (as built)
+
+Status: **implemented, tested (5/5 consecutive runs, no flakiness), committed**.
+
+##### Confirmed against Playwright's real current docs, not just the research sketch
+
+Before writing any code, `channel: 'chromium'` was re-verified directly against playwright.dev/docs/chrome-extensions (not assumed from the Phase 0 research alone, since that doc predates this implementation by weeks). Confirmed accurate: it's a real, current, documented option, and it's specifically what makes headless extension testing possible (`chromium.launchPersistentContext('', { channel: 'chromium', args: [...] })`) — without it Playwright historically required headed Chromium for extension tests. The official `test.extend<{context, extensionId}>({...})` fixture pattern was also confirmed current and used as-is.
+
+##### File map
+
+| File | Responsibility |
+|---|---|
+| `playwright.config.ts` | `testDir: './tests/e2e'`. Deliberately not part of `pnpm check`/Husky's pre-commit hook — a real Chromium launch is multi-second and needs a separately-installed browser binary, unlike the always-available Vitest suite. Run via `pnpm test:e2e` (builds first, then runs). |
+| `tests/e2e/fixtures/server.ts` | A minimal static HTTP server using only Node's built-in `http`/`fs` (no new dependency) — two distinct origins are two instances on two dynamically-allocated ports, since `shared/origin.ts`'s own `normalizeOrigin` already treats different ports on the same host as different origins. |
+| `tests/e2e/fixtures/login-form.html` | The fixture page itself — one `<form>`, required email + password inputs. |
+| `tests/e2e/formDetection.test.ts` | The actual test: launches the real `.output/chrome-mv3` build, navigates to origin 1, opens the popup, asserts; navigates to origin 2, reopens the popup, asserts both origins accumulate. |
+
+##### Real bugs found only by actually running it, not by reasoning about it
+
+Two genuine runtime failures surfaced only once the test was actually executed — neither was, or could have been, caught by static planning:
+
+- **`__dirname` doesn't exist.** `package.json`'s `"type": "module"` makes every `.ts` file here ESM, which has no `__dirname` global. Both `fixtures/server.ts` and `formDetection.test.ts` used `import.meta.dirname` (Node 20.11+/24) instead.
+- **`server.close()` hung forever.** Node's `http.Server.close()` only stops accepting *new* connections — it waits for existing ones to end on their own. Nothing in the test navigates the browser away from the last-visited origin before calling `close()`, so an idle keep-alive connection kept the promise from ever resolving. Fixed by also calling `server.closeAllConnections()` (Node 18.2+) to forcibly end any open sockets. Confirmed via a real trace (`pnpm exec playwright test --trace on`) and its screenshot, which showed the popup already correctly rendering both origins — the feature worked; only the test's own cleanup was hanging.
+
+##### Fixes from code review (`/code-review`, 3 findings, all fixed)
+
+- **A real race condition, not just a style nit.** `stores/session.store.ts`'s `fetchSessionState()` runs exactly once per mount, with no polling or retry. The original test did a single `popup.reload()` immediately after navigating to origin 2, with nothing waiting for the content script's `document_idle` injection plus the background round-trip to actually finish first — on a slower/loaded machine, the popup could render once with stale data and never update again, since a plain `toBeVisible()` retry only re-inspects the existing (unchanging) DOM. Fixed with `expect.poll()`, which re-runs the *entire* reload on every retry attempt (a fresh fetch each time, not just a fresh look at stale DOM) until origin 2 actually appears or a 10s timeout is hit.
+- **A resource leak if the second fixture server failed to start.** `siteA`/`siteB` were both `await`ed before the `try` block began, so a throw from the second call would leave the first server's socket open for the rest of the process. Fixed by moving both `startFixtureServer()` calls inside the `try`, declaring the variables as `FixtureServer | undefined` beforehand, and using `?.close()` in `finally` (a no-op for whichever one never got created).
+- **A comment pointed at documentation that didn't exist.** `playwright.config.ts`'s comment said "see README" for the one-time `playwright install chromium` step, but the README had no testing section at all. Fixed by actually adding one (`## Development` → `### Testing`), rather than just removing the dangling reference — and, while there, corrected the README's `## Status` line, which still said "no product code yet" despite M1–M6 all being implemented.
+
 ### M7 — Manual acceptance pass
 
 Run through, in a real Chrome (and ideally Firefox, given it's an explicit target) profile with the production build loaded unpacked:
