@@ -1,0 +1,56 @@
+// Guarantees sendResponse fires exactly once, even when a handler throws.
+// This is the direct fix for a real, shipped Attestto bug: "an unhandled
+// promise rejection meant the page or approval window waited on a reply
+// that would never come, indistinguishable from a user walking away"
+// (docs/research/attestto-teardown.md §7/§8.3). Every code path through
+// handleRuntimeMessage ends in exactly one sendResponse call: the
+// schema-rejection branch returns synchronously, and the .then/.catch
+// pair are mutually exclusive outcomes of the same promise -- nothing can
+// call sendResponse twice or zero times.
+//
+// handleRuntimeMessage is exported separately from installMessageRouter so
+// it can be unit-tested directly, without depending on the fidelity of a
+// fake browser.runtime.onMessage dispatch mechanism.
+
+import type { Browser } from 'wxt/browser';
+import { browser } from 'wxt/browser';
+import { ExtensionMessageSchema, type MessageResponse } from '../../shared/messages';
+import { registry } from './registry';
+
+export function handleRuntimeMessage(
+  raw: unknown,
+  sender: Browser.runtime.MessageSender,
+  sendResponse: (response: MessageResponse) => void,
+): boolean {
+  const parsed = ExtensionMessageSchema.safeParse(raw);
+
+  if (!parsed.success) {
+    // Reply path #1: validation failure. Always synchronous, always fires.
+    sendResponse({ ok: false, error: 'INVALID_MESSAGE' });
+    return false; // no async response coming
+  }
+
+  const message = parsed.data;
+  const entry = registry[message.type];
+
+  entry
+    .handle(message as never, { sender })
+    .then((data) => {
+      // Reply path #2: handler resolved.
+      sendResponse({ ok: true, data });
+    })
+    .catch((err: unknown) => {
+      // Reply path #3: handler threw or its promise rejected. This is
+      // the exact branch Attestto's own bug was missing.
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      sendResponse({ ok: false, error: errorMessage });
+    });
+
+  return true; // keep the message channel open for the async reply above
+}
+
+export function installMessageRouter(): void {
+  browser.runtime.onMessage.addListener((raw, sender, sendResponse) =>
+    handleRuntimeMessage(raw, sender, sendResponse),
+  );
+}

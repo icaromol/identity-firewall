@@ -25,6 +25,8 @@ describe('normalizeOrigin', () => {
   });
 
   it('treats different ports as different origins', () => {
-    expect(normalizeOrigin('http://localhost:3000/')).not.toBe(normalizeOrigin('http://localhost:5173/'));
+    expect(normalizeOrigin('http://localhost:3000/')).not.toBe(
+      normalizeOrigin('http://localhost:5173/'),
+    );
   });
 });

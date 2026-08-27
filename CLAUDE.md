@@ -79,6 +79,8 @@ Full rationale: `docs/browser-architecture.md`.
 | Storage | chrome.storage.local (small state) + IndexedDB (larger structures) |
 | Validation | Zod |
 | Testing | Vitest (unit) + Playwright (e2e) |
+| Linting/formatting | Biome |
+| Git hooks | Husky (pre-commit runs `pnpm check`: lint + type-check + unit tests) |
 
 ## How to treat reference projects
 

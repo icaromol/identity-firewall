@@ -1,5 +1,5 @@
-import { defineConfig } from 'wxt';
 import tailwindcss from '@tailwindcss/vite';
+import { defineConfig } from 'wxt';
 
 // See https://wxt.dev/api/config.html
 // Permissions are kept minimal on purpose — see docs/security-model.md

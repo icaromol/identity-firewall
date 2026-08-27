@@ -14,7 +14,12 @@
     "compile": "vue-tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "postinstall": "wxt prepare"
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "format": "biome format --write .",
+    "check": "pnpm lint && pnpm compile && pnpm test",
+    "postinstall": "wxt prepare",
+    "prepare": "husky"
   },
   "dependencies": {
     "pinia": "4.0.3",
@@ -22,8 +27,10 @@
     "zod": "4.4.3"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.5.10",
     "@tailwindcss/vite": "4.3.3",
     "@wxt-dev/module-vue": "^1.0.3",
+    "husky": "9.1.7",
     "tailwindcss": "4.3.3",
     "typescript": "^5.9.3",
     "vite": "^8.1.5",

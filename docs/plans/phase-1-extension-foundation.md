@@ -72,13 +72,144 @@ Before any handler or UI code, lock the wire format both sides agree on:
 ### M3 — Background service worker skeleton
 
 - `background/router/registry.ts` — the `Capability` type (`'formDetection' | 'session' | 'vault' | 'identity' | 'firewall'`) and the message-type → `{capability, handler}` map. Only `formDetection` and `session` have real rows in Phase 1; `vault`/`identity`/`firewall` are named with no rows yet.
-- `background/router/dispatch.ts` — `installMessageRouter()`, the single `chrome.runtime.onMessage` listener that validates against `ExtensionMessageSchema`, dispatches to the registry, and **guarantees `sendResponse` fires exactly once** via a structural `.then`/`.catch` wrapper (never a "remember to catch your promises" convention). This is the direct, load-bearing fix for a real shipped Attestto bug (`attestto-teardown.md` §7/§8.3: an unhandled rejection left a caller waiting forever). Full implementation: `phase-1-runtime-architecture.md` §1.
-- `background/session/state.ts` — the `chrome.storage.session`-backed `SessionState` (`Record<CanonicalOrigin, {formCount, lastDetectedAt}>`), with `getSessionState()`/`recordFormDetection()`. **Not held in an in-memory `Map` or module-level variable** — every read/write goes through `chrome.storage.session`, so a service-worker restart between two messages (the ~30-second MV3 idle-kill Attestto's own history documents as a real, shipped bug class) is invisible to correctness. `chrome.storage.session` (not `.local`) is deliberate: this is this-session's data, not a permanent record — a permanent per-site history is Phase 4's Privacy Ledger, not this.
+- `background/router/dispatch.ts` — `handleRuntimeMessage()` (installed via `installMessageRouter()`) validates against `ExtensionMessageSchema`, dispatches to the registry, and **guarantees `sendResponse` fires exactly once** via a structural `.then`/`.catch` wrapper (never a "remember to catch your promises" convention). This is the direct, load-bearing fix for a real shipped Attestto bug (`attestto-teardown.md` §7/§8.3: an unhandled rejection left a caller waiting forever). Full implementation: `phase-1-runtime-architecture.md` §1.
+- `background/session/state.ts` — the `browser.storage.session`-backed `SessionState` (`Record<CanonicalOrigin, {formCount, lastDetectedAt}>`), with `getSessionState()`/`recordFormDetection()`. **Not held in an in-memory `Map` or module-level variable** — every read/write goes through `browser.storage.session`, so a service-worker restart between two messages (the ~30-second MV3 idle-kill Attestto's own history documents as a real, shipped bug class) is invisible to correctness. `browser.storage.session` (not `.local`) is deliberate: this is this-session's data, not a permanent record — a permanent per-site history is Phase 4's Privacy Ledger, not this.
+  - **Correction found during implementation**: the research and this plan originally said `chrome.storage.session`/`chrome.runtime.onMessage`. WXT does not expose a typed `chrome` global at all — it exposes `browser` (imported explicitly from `wxt/browser` in this codebase, rather than relied on as an auto-imported ambient global, for auditability). On Chromium, `browser` *is* literally `globalThis.chrome` at runtime; on Firefox it's the native `browser` object. Every reference in code and in this doc should say `browser.*`, not `chrome.*`.
 - `background/session/handler.ts` — `handleGetSessionState`, `handleGetOriginState`, reading from `session/state.ts`.
 - `background/formDetection/handler.ts` — `handleFormDetected`, writing to `session/state.ts` via `recordFormDetection`.
 - `background/vault/index.ts`, `background/identity/index.ts`, `background/firewall/index.ts` — stub modules (`export {}` plus a comment naming which phase fills them in). These exist purely so the directory shape is stable from Phase 1 onward; Phase 2/3 add files inside, not a restructure.
 - `entrypoints/background.ts` — thin composition root: `defineBackground(() => installMessageRouter())`, nothing else.
 - **Acceptance for M3**: unit tests confirm (a) a valid message reaches the correct handler exactly once, (b) a handler that throws still produces exactly one `{ok: false, ...}` reply — never zero, never two — and (c) an invalid raw message never reaches any handler; a `recordFormDetection` + `getSessionState` round-trip test confirms multiple origins accumulate rather than overwrite each other.
+
+#### M3 — Implementation (as built)
+
+Status: **implemented, tested, not yet committed** (pending review). This subsection documents what actually exists on disk right now, not just the plan for it — treat it as the as-built reference for `background/`.
+
+##### File map
+
+| File | Responsibility |
+|---|---|
+| `entrypoints/background.ts` | Composition root. Only calls `installMessageRouter()`. Nothing else lives here. |
+| `background/router/dispatch.ts` | `handleRuntimeMessage()` — validate, dispatch, guarantee exactly one reply. `installMessageRouter()` — the one line that registers it with `browser.runtime.onMessage`. |
+| `background/router/registry.ts` | The `Capability` type and the `message.type → {capability, handle}` map. The only file that has to change when a new message type is added. |
+| `background/session/state.ts` | Owns the one piece of Phase 1 state (`SessionState`) and the only two functions allowed to touch `browser.storage.session` for it. |
+| `background/session/handler.ts` | Translates `GET_SESSION_STATE`/`GET_ORIGIN_STATE` messages into calls on `session/state.ts`. |
+| `background/formDetection/handler.ts` | Translates a `FORM_DETECTED` message into a `recordFormDetection` call, normalizing the origin first. |
+| `background/vault/index.ts`, `background/identity/index.ts`, `background/firewall/index.ts` | Empty stubs (`export {}`). No registry rows point at them yet. |
+| `shared/messages.ts` | The Zod schemas + `ExtensionMessage` union + `MessageResponse` envelope — the wire contract every one of the files above agrees on. |
+| `shared/origin.ts` | `normalizeOrigin()` — the one function allowed to turn a raw URL/origin string into a `CanonicalOrigin` storage key. |
+
+##### How the files connect (static dependency graph)
+
+```text
+entrypoints/background.ts
+        │
+        │ installMessageRouter()
+        ▼
+background/router/dispatch.ts ───────────────▶ shared/messages.ts
+        │  registry[message.type]                (ExtensionMessageSchema,
+        ▼                                          MessageResponse)
+background/router/registry.ts
+        │
+        ├─ FORM_DETECTED ─────▶ background/formDetection/handler.ts ─▶ shared/origin.ts
+        │                              │                                (normalizeOrigin)
+        │                              ▼
+        │                        background/session/state.ts ─▶ browser.storage.session
+        │                              ▲
+        ├─ GET_SESSION_STATE ─▶ background/session/handler.ts ─┘
+        ├─ GET_ORIGIN_STATE  ─▶ (same file, same state.ts)
+        │
+        ├─ (no rows yet) ─────▶ background/vault/index.ts      [STUB — Phase 2]
+        ├─ (no rows yet) ─────▶ background/identity/index.ts   [STUB — Phase 2]
+        └─ (no rows yet) ─────▶ background/firewall/index.ts   [STUB — Phase 3]
+```
+
+Nothing outside `background/router/registry.ts` needs to know that `vault`/`identity`/`firewall` don't have real handlers yet — the type system just has no message types that route there.
+
+##### Sequence: a read (`GET_SESSION_STATE`, from the popup)
+
+```text
+Popup
+ │  browser.runtime.sendMessage({ type: 'GET_SESSION_STATE' })
+ ▼
+browser.runtime.onMessage  ── the listener installMessageRouter() registered
+ ▼
+dispatch.ts: handleRuntimeMessage(raw, sender, sendResponse)
+ │
+ ├─ ExtensionMessageSchema.safeParse(raw)
+ │     ✕ invalid  → sendResponse({ ok:false, error:'INVALID_MESSAGE' }); return false   [reply path #1]
+ │     ✓ valid
+ ▼
+registry.ts: registry['GET_SESSION_STATE'] → { capability:'session', handle: handleGetSessionState }
+ ▼
+session/handler.ts: handleGetSessionState(message)
+ ▼
+session/state.ts: getSessionState()
+ ▼
+browser.storage.session.get(SESSION_STORAGE_KEY) → { originForms: {...} }
+ ▼  (resolves back up through the same promise chain)
+dispatch.ts:
+   .then(data  => sendResponse({ ok:true,  data }))              [reply path #2]
+   .catch(err  => sendResponse({ ok:false, error: err.message })) [reply path #3]
+ ▼
+Popup receives { ok: true, data: { originsWithForms: [...] } }
+```
+
+`GET_ORIGIN_STATE` takes the identical path, just calling `handleGetOriginState` instead and returning one origin's record (or `null`) instead of the whole list.
+
+##### Sequence: a write (`FORM_DETECTED`, from the content script)
+
+```text
+Content script (Phase 1 placeholder today, real detection in M4)
+ │  browser.runtime.sendMessage({ type:'FORM_DETECTED', payload:{ origin, url, detectedAt, forms } })
+ ▼
+dispatch.ts: handleRuntimeMessage  ── same validate → registry lookup → dispatch as above
+ ▼
+registry.ts: registry['FORM_DETECTED'] → { capability:'formDetection', handle: handleFormDetected }
+ ▼
+formDetection/handler.ts: handleFormDetected(message)
+ │
+ ├─ normalizeOrigin(message.payload.origin)   ── shared/origin.ts, the one canonical function
+ ▼
+session/state.ts: recordFormDetection(canonicalOrigin, forms.length, detectedAt)
+ │
+ ├─ getSessionState()          ── read the current map
+ ├─ mutate the in-memory copy  ── state.originForms[origin] = {...}
+ ▼
+browser.storage.session.set({ [SESSION_STORAGE_KEY]: state })  ── write the whole map back
+ ▼
+handler resolves { recorded: true } → dispatch.ts's .then → sendResponse({ ok:true, data:{recorded:true} })
+```
+
+##### The exactly-once reply guarantee, visually
+
+This is the direct fix for the Attestto bug in `docs/research/attestto-teardown.md` §7/§8.3 (an unhandled rejection left a caller waiting forever). Every call to `handleRuntimeMessage` takes **exactly one** of these three exits — never zero, never two:
+
+```text
+handleRuntimeMessage(raw, sender, sendResponse)
+        │
+        ▼
+   schema valid? ──✕ NO──▶ sendResponse({ok:false, error:'INVALID_MESSAGE'})   [path #1 — synchronous]
+        │
+        ✓ YES
+        ▼
+   entry.handle(message, {sender})   ── always returns a Promise
+        │
+        ├── resolves ──▶ sendResponse({ok:true,  data})                       [path #2 — .then]
+        └── rejects  ──▶ sendResponse({ok:false, error: err.message})         [path #3 — .catch]
+```
+
+Paths #2 and #3 are mutually exclusive outcomes of the *same* promise (a promise settles exactly once), and path #1 returns before that promise is even created — so there is no code path in this function that can call `sendResponse` twice, and no code path that can silently swallow a thrown error and call it zero times.
+
+##### Test coverage (21 tests total, all passing)
+
+- `tests/unit/shared/messages.test.ts` — schema accepts valid payloads for all three message types, rejects an unknown `type`, a missing required field, and a wrong field type.
+- `tests/unit/shared/origin.test.ts` — default-port stripping, lowercasing, non-default ports kept distinct, query/hash ignored.
+- `tests/unit/background/router/dispatch.test.ts` — the three reply-path guarantees above, tested directly: a valid message replies once; an invalid message replies once, synchronously, without reaching any handler; a handler forced to throw (by making `fakeBrowser.storage.session.get` reject) still replies exactly once, with the thrown error's message.
+- `tests/unit/background/session/state.test.ts` — empty state, single round-trip, multiple distinct origins accumulating, and re-detection on the same origin overwriting only that origin's record.
+- `tests/unit/background/formDetection/handler.test.ts` — an end-to-end call through `handleFormDetected` confirms the origin is normalized (a mixed-case, default-port URL in the message payload is looked up in session state via its normalized form) before being used as a storage key.
+
+All tests mock the browser API by importing `fakeBrowser` from `wxt/testing/fake-browser` — the same singleton object `WxtVitest()` aliases `wxt/browser`'s `browser` export to during tests, so exercising `fakeBrowser.storage.session` in a test is exercising the exact object the production code reads and writes through `browser.storage.session`.
 
 ### M4 — Content script
 

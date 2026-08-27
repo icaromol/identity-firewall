@@ -120,6 +120,8 @@ A source-level teardown of Attestto (`docs/research/attestto-teardown.md`) surfa
 | Authentication | **WebAuthn / Credential Management API** | Passkeys are a mature, phishing-resistant standard — build on it rather than inventing a parallel authentication mechanism. |
 | Validation | **Zod** | Schema validation for the data flowing between content script, background service, and UI. |
 | Testing | **Vitest** (unit) + **Playwright** (e2e) | Standard, well-supported testing stack for a browser extension. |
+| Linting/formatting | **Biome** | Single Rust-based tool for both linting and formatting — no separate ESLint+Prettier config pair to keep in sync. |
+| Git hooks | **Husky** (pre-commit: lint + type-check + unit tests, via `pnpm check`) | Catches a broken build/format/test before it's committed, not after. |
 
 ### Relationship to Attestto's stack
 
