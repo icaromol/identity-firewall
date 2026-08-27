@@ -159,6 +159,8 @@ Encrypted Local Vault
 
 No proprietary server involved.
 
+**Detailed execution plan:** [`plans/phase-2-local-identity-vault.md`](plans/phase-2-local-identity-vault.md) — milestones M1–M9, the three-key hierarchy (VaultUnlockKey / RootSecret / BackupExportKey), the WebAuthn-PRF-plus-passphrase-fallback unlock decision, the Ed25519-over-ECDSA correction to ADR-010, and a "Gate to start Phase 3" checklist grounded directly in `threat-model.md`'s security-review questions.
+
 ---
 
 ## Phase 3 — Identity Firewall
