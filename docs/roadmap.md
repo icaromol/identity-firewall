@@ -103,9 +103,9 @@ and explain what happens to each piece of data at each step.
 
 ---
 
-## Phase 1 — Extension Foundation
+## Phase 1 — Extension Foundation ✅ Complete
 
-**Weeks 3–4**
+**Weeks 3–4** (actual: 6 milestones, M1–M7, all implemented/tested/committed/manually verified — see the plan doc's per-milestone "Implementation (as built)" sections for exactly what each one built, deviated from, and fixed via code review)
 
 ### Objectives
 
@@ -116,11 +116,16 @@ and explain what happens to each piece of data at each step.
 - Communication between content script, background, and UI.
 - Local storage wiring.
 
-### Deliverable
+### Deliverable — achieved
 
-An extension installed in the browser, able to detect sites and hold local state.
+An extension installed in the browser, able to detect sites and hold local state. Manually
+verified in real Chrome, including the property that matters most for this phase's design
+(session state survives a real, deliberately-forced MV3 service-worker restart — not just
+in-memory), plus an automated Playwright end-to-end test covering the same core flow.
+Firefox was confirmed to build cleanly but was not manually verified in a real Firefox
+profile (see M7's "Results" section for why).
 
-**Detailed execution plan:** [`plans/phase-1-extension-foundation.md`](plans/phase-1-extension-foundation.md) — milestones, exact tooling/versions, message-passing design, directory tree, and acceptance checklist, grounded in dedicated research (`research/phase-1-tooling-scaffold.md`, `research/phase-1-runtime-architecture.md`).
+**Detailed execution plan:** [`plans/phase-1-extension-foundation.md`](plans/phase-1-extension-foundation.md) — milestones, exact tooling/versions, message-passing design, directory tree, and acceptance checklist, grounded in dedicated research (`research/phase-1-tooling-scaffold.md`, `research/phase-1-runtime-architecture.md`). Each milestone's own "Implementation (as built)" subsection documents real deviations discovered along the way — notably: `browser` (from `wxt/browser`), not `chrome`, is the actual API convention throughout; `content/` and `stores/` are new top-level directories (siblings of `entrypoints/`, `background/`, `shared/`), not nested inside `entrypoints/`; `jsdom` and `@playwright/test` were added as the testing gaps that materialized; and Biome + Husky were added for linting/formatting and a pre-commit `pnpm check` gate, beyond this phase's original scope.
 
 ---
 

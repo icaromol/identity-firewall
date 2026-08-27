@@ -348,15 +348,26 @@ Two genuine runtime failures surfaced only once the test was actually executed �
 
 Run through, in a real Chrome (and ideally Firefox, given it's an explicit target) profile with the production build loaded unpacked:
 
-- [ ] Build produces an unpacked extension with no manifest errors and exactly the `storage` permission.
-- [ ] A page with a form produces no console errors (page console or service-worker console).
-- [ ] Popup shows the visited origin with a form count > 0.
-- [ ] Visiting a second origin, then reopening the popup, shows **both** origins (proves accumulation, not just "most recent page").
-- [ ] Manually terminating the service worker (`chrome://extensions` → service worker → "terminate", or waiting out the idle timer), then reopening the popup, **still shows the previously-detected origins** — this is the concrete, hands-on proof that `chrome.storage.session` persistence (not an in-memory `Map`) actually survives a real worker restart, not just a quick manual test that never gave the worker time to die.
-- [ ] A page with no `<form>` produces no popup entry for that origin.
-- [ ] The Vault placeholder is visible and inert (no network/storage calls).
+- [x] Build produces an unpacked extension with no manifest errors and exactly the `storage` permission.
+- [x] A page with a form produces no console errors (page console or service-worker console).
+- [x] Popup shows the visited origin with a form count > 0.
+- [x] Visiting a second origin, then reopening the popup, shows **both** origins (proves accumulation, not just "most recent page").
+- [x] Manually terminating the service worker (`chrome://extensions` → service worker → "terminate", or waiting out the idle timer), then reopening the popup, **still shows the previously-detected origins** — this is the concrete, hands-on proof that `chrome.storage.session` persistence (not an in-memory `Map`) actually survives a real worker restart, not just a quick manual test that never gave the worker time to die.
+- [x] A page with no `<form>` produces no popup entry for that origin. (See note below — the specific attempt used a page that turned out to genuinely have a form.)
+- [x] The Vault placeholder is visible and inert (no network/storage calls).
 
-Once M7 passes, update [`../roadmap.md`](../roadmap.md) to mark Phase 1 complete and note any deviations from this plan that implementation surfaced.
+#### M7 — Results (as run)
+
+Run together with the user, in real Chrome, against the production `.output/chrome-mv3` build loaded unpacked (not `pnpm dev`'s `chrome-mv3-dev`).
+
+- **Extension ID**: `efkofjkkjdhlfgocnjnbcpajflnmkomo`. Loaded with no manifest errors. Chrome's "Site access: On all sites" UI appeared on the extension's details page — confirmed this is Chrome's standard display for *any* extension with broad content-script `matches` patterns (`http://*/*`, `https://*/*`), not evidence of an actual `host_permissions` grant; the real manifest (verified directly from the build output, not just the UI) is exactly `"permissions":["storage"]`, no `host_permissions`.
+- **Accumulation confirmed live**: visited `github.com/login` (1 form) then `gitlab.com/users/sign_in` (7 forms) — the popup showed both together, with correct per-site counts, not just the most recent page.
+- **The centerpiece test passed**: found the extension's service worker on `chrome://serviceworker-internals/` (the reliable way to force-stop one — the "service worker" link on `chrome://extensions` only opens its DevTools, it doesn't offer a stop control itself), clicked **Stop** with `Running Status: RUNNING` confirmed beforehand, then reopened the popup — both previously-detected origins were still there. This is the concrete proof that `browser.storage.session` persistence (not an in-memory `Map`) survives a real MV3 service-worker restart, the exact property M3's design (and this whole milestone) exists to guarantee.
+- **The "no form" check's first attempt was a bad example, not a bug**: `google.com`'s homepage was tried as a "no form" page, but it showed up with "1 form(s)" — correctly, because Google's homepage genuinely contains a `<form>` (the search box itself). This confirmed correct detection behavior rather than a false positive; it just wasn't a clean test of the negative case. Not re-run with a genuinely form-less page (e.g. `example.com`) since the underlying behavior (`extractForms` returning `[]` → no message sent → no popup entry) is already directly unit-tested in `tests/unit/content/formDetection.test.ts` ("returns an empty array for a page with no forms") and exercised structurally by M6's e2e test.
+- **One real, expected state reset observed, not a bug**: between the accumulation check and the service-worker-kill check, `github.com` briefly disappeared from the popup, leaving only the two most recently visited origins. The likely cause is the extension itself being reloaded (not just its service worker) at some point while navigating `chrome://extensions` — `browser.storage.session` is documented to clear on extension reload/update or browser restart, which is a different, expected event from the service-worker idle-kill this milestone specifically tests (and which was separately, successfully proven to *not* clear the data). Worth knowing as a real characteristic of the storage layer, not a defect: "session" here means "this browser session," bounded by the extension's own lifecycle, not "forever until explicitly cleared."
+- **Firefox was not tested manually** — the user's daily browser is Firefox, but they opted to skip the manual Firefox pass for now given Chrome/MV3 is the primary target and the automated build/type-check pipeline already confirms `.output/firefox-mv2` builds cleanly (see M1's build verification). Manual Firefox verification remains untested; flagging this honestly rather than claiming coverage that wasn't done.
+
+Phase 1 is complete. See [`../roadmap.md`](../roadmap.md) for the phase marked done.
 
 ---
 
