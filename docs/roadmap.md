@@ -120,6 +120,8 @@ and explain what happens to each piece of data at each step.
 
 An extension installed in the browser, able to detect sites and hold local state.
 
+**Detailed execution plan:** [`plans/phase-1-extension-foundation.md`](plans/phase-1-extension-foundation.md) — milestones, exact tooling/versions, message-passing design, directory tree, and acceptance checklist, grounded in dedicated research (`research/phase-1-tooling-scaffold.md`, `research/phase-1-runtime-architecture.md`).
+
 ---
 
 ## Phase 2 — Local Identity Vault
