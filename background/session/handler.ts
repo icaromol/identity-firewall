@@ -1,5 +1,5 @@
 import type { GetOriginStateMessage, GetSessionStateMessage } from '../../shared/messages';
-import type { CanonicalOrigin } from '../../shared/origin';
+import { normalizeOrigin } from '../../shared/origin';
 import { getSessionState } from './state';
 
 export async function handleGetSessionState(_message: GetSessionStateMessage): Promise<{
@@ -18,5 +18,5 @@ export async function handleGetOriginState(
   message: GetOriginStateMessage,
 ): Promise<{ formCount: number; lastDetectedAt: number } | null> {
   const state = await getSessionState();
-  return state.originForms[message.payload.origin as CanonicalOrigin] ?? null;
+  return state.originForms[normalizeOrigin(message.payload.origin)] ?? null;
 }

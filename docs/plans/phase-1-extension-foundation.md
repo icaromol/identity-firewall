@@ -181,6 +181,8 @@ browser.storage.session.set({ [SESSION_STORAGE_KEY]: state })  ── write the 
 handler resolves { recorded: true } → dispatch.ts's .then → sendResponse({ ok:true, data:{recorded:true} })
 ```
 
+This read-modify-write is not atomic on its own -- two `recordFormDetection` calls arriving close together (e.g. two tabs restored at once) would otherwise both read the same pre-update snapshot and the later `set()` would clobber the earlier one's origin. `session/state.ts` serializes calls through an in-memory promise queue so each write waits for the previous one to finish before reading. The queue holds no state that correctness depends on across a service-worker restart -- it only orders writes made while one worker instance is alive.
+
 ##### The exactly-once reply guarantee, visually
 
 This is the direct fix for the Attestto bug in `docs/research/attestto-teardown.md` §7/§8.3 (an unhandled rejection left a caller waiting forever). Every call to `handleRuntimeMessage` takes **exactly one** of these three exits — never zero, never two:
@@ -201,12 +203,13 @@ handleRuntimeMessage(raw, sender, sendResponse)
 
 Paths #2 and #3 are mutually exclusive outcomes of the *same* promise (a promise settles exactly once), and path #1 returns before that promise is even created — so there is no code path in this function that can call `sendResponse` twice, and no code path that can silently swallow a thrown error and call it zero times.
 
-##### Test coverage (21 tests total, all passing)
+##### Test coverage (25 tests total, all passing)
 
 - `tests/unit/shared/messages.test.ts` — schema accepts valid payloads for all three message types, rejects an unknown `type`, a missing required field, and a wrong field type.
 - `tests/unit/shared/origin.test.ts` — default-port stripping, lowercasing, non-default ports kept distinct, query/hash ignored.
 - `tests/unit/background/router/dispatch.test.ts` — the three reply-path guarantees above, tested directly: a valid message replies once; an invalid message replies once, synchronously, without reaching any handler; a handler forced to throw (by making `fakeBrowser.storage.session.get` reject) still replies exactly once, with the thrown error's message.
-- `tests/unit/background/session/state.test.ts` — empty state, single round-trip, multiple distinct origins accumulating, and re-detection on the same origin overwriting only that origin's record.
+- `tests/unit/background/session/state.test.ts` — empty state, single round-trip, multiple distinct origins accumulating, re-detection on the same origin overwriting only that origin's record, an empty state read after a recorded one is a real empty object rather than a stale reference, and two concurrent `recordFormDetection` calls on different origins both survive (the write queue, not a shared object identity).
+- `tests/unit/background/session/handler.test.ts` — `handleGetOriginState` finds a record when queried with a non-canonical form of an origin that was stored normalized, and returns `null` for an origin with no record.
 - `tests/unit/background/formDetection/handler.test.ts` — an end-to-end call through `handleFormDetected` confirms the origin is normalized (a mixed-case, default-port URL in the message payload is looked up in session state via its normalized form) before being used as a storage key.
 
 All tests mock the browser API by importing `fakeBrowser` from `wxt/testing/fake-browser` — the same singleton object `WxtVitest()` aliases `wxt/browser`'s `browser` export to during tests, so exercising `fakeBrowser.storage.session` in a test is exercising the exact object the production code reads and writes through `browser.storage.session`.

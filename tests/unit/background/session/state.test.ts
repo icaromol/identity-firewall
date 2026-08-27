@@ -40,4 +40,23 @@ describe('session state', () => {
     const state = await getSessionState();
     expect(state.originForms[origin]).toEqual({ formCount: 5, lastDetectedAt: 200 });
   });
+
+  it('does not carry a recorded origin over into a later empty state', async () => {
+    const origin = 'https://example.com' as CanonicalOrigin;
+    await recordFormDetection(origin, 1, 100);
+    await fakeBrowser.storage.session.clear();
+
+    expect(await getSessionState()).toEqual({ originForms: {} });
+  });
+
+  it('does not lose an update when two calls race on different origins', async () => {
+    const originA = 'https://a.example' as CanonicalOrigin;
+    const originB = 'https://b.example' as CanonicalOrigin;
+
+    await Promise.all([recordFormDetection(originA, 1, 100), recordFormDetection(originB, 3, 200)]);
+
+    const state = await getSessionState();
+    expect(state.originForms[originA]).toEqual({ formCount: 1, lastDetectedAt: 100 });
+    expect(state.originForms[originB]).toEqual({ formCount: 3, lastDetectedAt: 200 });
+  });
 });

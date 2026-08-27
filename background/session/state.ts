@@ -25,19 +25,31 @@ export interface SessionState {
   originForms: Record<string, OriginFormRecord>; // keyed by CanonicalOrigin
 }
 
-const EMPTY_STATE: SessionState = { originForms: {} };
-
 export async function getSessionState(): Promise<SessionState> {
   const stored = await browser.storage.session.get(SESSION_STORAGE_KEY);
-  return (stored[SESSION_STORAGE_KEY] as SessionState | undefined) ?? EMPTY_STATE;
+  return (stored[SESSION_STORAGE_KEY] as SessionState | undefined) ?? { originForms: {} };
 }
 
-export async function recordFormDetection(
+// recordFormDetection's read-modify-write against storage.session is not
+// atomic on its own, so concurrent calls (e.g. two tabs reporting forms
+// near-simultaneously) are serialized through this in-memory queue --
+// each call waits for the previous call's storage write to finish before
+// reading. This is safe across a service-worker restart: the queue holds
+// no state that correctness depends on, it only orders writes that happen
+// while a single worker instance is alive; if the worker is killed
+// mid-write, there is nothing pending to lose track of.
+let writeQueue: Promise<void> = Promise.resolve();
+
+export function recordFormDetection(
   origin: CanonicalOrigin,
   formCount: number,
   detectedAt: number,
 ): Promise<void> {
-  const state = await getSessionState();
-  state.originForms[origin] = { formCount, lastDetectedAt: detectedAt };
-  await browser.storage.session.set({ [SESSION_STORAGE_KEY]: state });
+  const result = writeQueue.then(async () => {
+    const state = await getSessionState();
+    state.originForms[origin] = { formCount, lastDetectedAt: detectedAt };
+    await browser.storage.session.set({ [SESSION_STORAGE_KEY]: state });
+  });
+  writeQueue = result.catch(() => {});
+  return result;
 }
