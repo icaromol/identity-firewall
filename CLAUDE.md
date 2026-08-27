@@ -1,0 +1,126 @@
+# CLAUDE.md
+
+Standing instructions for any Claude Code session working on this repository. This is currently a **docs-only** repository — no product code exists yet. Read this file fully before making architectural decisions or starting implementation.
+
+## What this project is
+
+Identity Vault / Identity Firewall is a **local-first, open-source, privacy-first browser extension**. It is a personal project belonging to one person — it is **not a company, not a startup, has no cloud backend, and is not seeking funding or users to acquire**. Its core idea is an "Identity Firewall": a layer that isolates the user's identity per website (a distinct identity, credential, and/or alias per service instead of one identity reused everywhere) and puts the user in explicit control of exactly what data each site receives. See `docs/product-vision.md` for the full rationale.
+
+## The 7 non-negotiable principles
+
+Defined before any technical architecture, specifically so implementation decisions can always be checked against them. Full rationale in `docs/product-vision.md` §5.
+
+1. **Local-first** — identity and keys must function without any external server; no dependency on "our" server, API, account system, or infrastructure.
+2. **User-owned** — keys and data belong to the user (`User → Device → Vault`, never `User → Our Cloud → Identity`).
+3. **Minimization** — share the minimum necessary, and nothing more by default.
+4. **Explicit consent** — sensitive data is never shared silently.
+5. **Isolation** — every service gets an independent identity/credential whenever possible (`Site A ≠ Site B ≠ Site C`).
+6. **Transparency** — the user must always be able to answer: who asked, what did they ask for, what did I hand over, when, and why.
+7. **Don't promise anonymity** — never claim to hide IP address, fingerprinting, DNS, cookies, or network traffic. This product protects identity, not network privacy.
+
+Any implementation decision that conflicts with one of these needs either a design change or an explicit ADR justifying the exception.
+
+## MVP scope
+
+Full phase-by-phase breakdown: `docs/roadmap.md`. At a glance:
+
+### In scope
+- Browser extension
+- Local encrypted vault
+- Root identity
+- Service identities
+- Unique credentials
+- Form detection
+- Field classification
+- Required/optional detection
+- Optional fields blocked by default
+- User approval flow
+- Real data responses
+- Alias data responses
+- Synthetic data responses
+- Denial responses
+- Sensitive-data classification
+- Local biometric authorization
+- Privacy Ledger
+- Policy Engine
+- Government/financial sensitive-site protection (safe mode)
+- Backup/recovery
+- No proprietary server dependency
+- Open-source code
+- Public threat model
+- Explicit privacy limitations
+
+### Out of scope (MVP)
+- Blockchain
+- Cryptocurrency/token
+- VPN
+- Tor
+- Private DNS
+- Custom browser
+- Email server
+- DID infrastructure
+- Full Verifiable Credential ecosystem
+- Custom biometric cryptography
+- Cloud synchronization
+- Proprietary identity server
+- Mandatory SDK
+
+## Chosen stack
+
+Full rationale: `docs/browser-architecture.md`.
+
+| Layer | Choice |
+|---|---|
+| Extension framework | WXT + Manifest V3 |
+| Language | TypeScript |
+| UI | Vue 3 + Tailwind + Pinia |
+| Cryptography | Web Crypto API (never hand-rolled crypto) |
+| Authentication | WebAuthn / Credential Management API |
+| Storage | chrome.storage.local (small state) + IndexedDB (larger structures) |
+| Validation | Zod |
+| Testing | Vitest (unit) + Playwright (e2e) |
+
+## How to treat reference projects
+
+Full comparison: `docs/competitive-landscape.md`.
+
+- **Attestto** (attestto-creds-extension) — study its architecture and decisions closely (vault structure, pairwise per-origin identity, field-level consent, Web Crypto usage). Do not fork it or depend on it.
+- **SimpleLogin / addy.io** — integrate via their API for email aliasing. Do not rebuild an email/SMTP/DNS stack.
+- **WebAuthn** — use directly as the authentication substrate. Do not invent an alternative authentication ceremony.
+- **AltMe / DID / VC** — study for future interoperability concepts only. Do not implement DID/VC infrastructure in the MVP (see `docs/adr/ADR-008-defer-did-vc-sdk.md`).
+- **Justitia** — academic reference for future biometric-cryptography R&D (Phase 12). Never a production dependency (see `docs/adr/ADR-005-biometric-as-unlock-not-secret.md`).
+
+## What's explicitly never being built in the core
+
+See `docs/adr/` for the full reasoning behind each:
+
+- No blockchain, cryptocurrency, or token (`ADR-006-no-blockchain.md`).
+- No custom/hand-rolled cryptography (`ADR-003-web-crypto-not-custom.md`).
+- No proprietary server dependency (`ADR-001-local-first.md`, `ADR-007-no-server-dependency.md`).
+- No mandatory SDK for the MVP (`ADR-008-defer-did-vc-sdk.md`).
+
+## Working instructions for Claude
+
+- **Before making an architectural decision**, read the relevant doc(s) under `docs/` first. Don't re-derive decisions that are already made and documented.
+- **If a new significant architectural decision is made**, add a new ADR under `docs/adr/` following the existing template (Status / Context / Decision / Consequences) rather than only describing it in a doc's prose. Number it sequentially after the existing highest ADR.
+- **Treat `docs/archive/business-context.md` as historical only.** Never resurrect startup/business framing (pricing tiers, investor pitches, market sizing, growth metrics, CAC/retention-for-monetization) into product decisions unless the user explicitly asks to revisit that direction. See `docs/adr/ADR-009-personal-oss-project-not-startup.md`.
+- **The source transcript** `Brainstorm-Briefing De Identidade Digital-20260827-0224.md` at the project root is the canonical raw source (in Portuguese) if any doc's fidelity to the original brainstorm is ever in question.
+- Default to the simplest thing that satisfies the 7 principles above and the current phase in `docs/roadmap.md` — don't build ahead into later phases (e.g. don't reach for DID/VC or blockchain because they seem more "proper"; see the ADRs on why they're deferred/excluded).
+- When touching cryptography, biometrics, identity derivation, or anything storage-related, check `docs/threat-model.md` and `docs/security-model.md` first — these define the attacker models and boundaries the implementation needs to satisfy.
+
+## `docs/` index
+
+- `docs/product-vision.md` — what the project is, the core problem, the three identity models, the 7 principles, the killer features, and the "don't promise anonymity" scope boundary.
+- `docs/architecture.md` — overall system architecture and component responsibilities.
+- `docs/identity-model.md` — root identity, per-service identity derivation, and how identities relate to each other.
+- `docs/data-model.md` — the vault's data structures, field classification, and sensitivity levels.
+- `docs/privacy-model.md` — data minimization, disclosure policy, and the Privacy Ledger design.
+- `docs/security-model.md` — security boundaries, key management, and hardening decisions.
+- `docs/threat-model.md` — attacker models (malicious site, compromised site, local malware, device theft, correlation attacks) and what is/isn't defended against.
+- `docs/biometric-model.md` — biometric authorization design, Model A (unlock) vs. Model B (cryptographic secret derivation) and the R&D plan for the latter.
+- `docs/browser-architecture.md` — extension internals (content script / background service / UI), the legacy-web-compatibility pipeline, and the chosen stack.
+- `docs/interoperability.md` — legacy vs. native mode, the four-phase evolution, SD-JWT/selective-disclosure plan, deferred DID/VC, the future Private Login Protocol and SDK sketch, and why no blockchain.
+- `docs/competitive-landscape.md` — survey of prior art (Attestto, SimpleLogin, addy.io, AltMe, Justitia, WebAuthn) and what to reuse vs. build.
+- `docs/roadmap.md` — the phase-by-phase build plan (Phase 0–12), MVP scope checklists, and the strategic sequence/horizon.
+- `docs/adr/` — 9 Architecture Decision Records (ADR-001 through ADR-009) covering local-first, browser-extension distribution, Web Crypto, pairwise service identities, biometrics-as-unlock, no-blockchain, no-server-dependency, deferred DID/VC/SDK, and the personal-project-not-startup pivot.
+- `docs/archive/business-context.md` — historical, pre-pivot startup framing (market sizing, personas-as-customers, investors, GTM). Not active guidance.
