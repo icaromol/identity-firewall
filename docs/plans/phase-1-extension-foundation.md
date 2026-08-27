@@ -222,6 +222,41 @@ All tests mock the browser API by importing `fakeBrowser` from `wxt/testing/fake
 - Full implementation: `phase-1-runtime-architecture.md` §3.
 - **Acceptance for M4**: a unit test against a JSDOM fixture confirms the extractor captures `tagName`/`type`/`name`/`id`/`required` correctly for a known form and does not attempt semantic classification; a page with zero `<form>` elements produces no extracted output.
 
+#### M4 — Implementation (as built)
+
+Status: **implemented, tested, committed**.
+
+##### Deviation from the plan: a new `content/formDetection.ts`
+
+The original directory-tree sketch only listed `entrypoints/content.ts`. During implementation, the pure DOM-extraction logic was split into a new top-level `content/formDetection.ts` module instead of living inside `entrypoints/content.ts` directly — mirroring the M3 precedent exactly: `entrypoints/*.ts` files are thin composition roots (`entrypoints/background.ts` only calls `installMessageRouter()`); everything testable lives in a plain module a Vitest test can import without going through WXT's entrypoint machinery. `defineContentScript()` is a pure identity function (confirmed by reading WXT's own source — it never calls `main()` at import time), so importing an entrypoint file directly in a test would have been safe too, but keeping the pure logic in a sibling module avoids any need for the test file to touch `browser`/`fakeBrowser` at all, since only `entrypoints/content.ts` (not `content/formDetection.ts`) imports `wxt/browser`.
+
+- `content/formDetection.ts` — two pure functions:
+  - `extractForms(doc: Document): DetectedForm[]` — DOM-walking only.
+  - `buildFormDetectedMessage(doc: Document, href: string, detectedAt: number): FormDetectedMessage | null` — calls `extractForms`, returns `null` when there are zero forms (the actual "should we send at all" decision). `href` and `detectedAt` are explicit parameters rather than read internally from `location.href`/`Date.now()`, matching `background/session/state.ts`'s `recordFormDetection(origin, formCount, detectedAt)` convention from M3.
+- `entrypoints/content.ts` — imports `browser` from `wxt/browser` (explicit, matching the M3 convention) and `buildFormDetectedMessage`; `main()` builds the message, returns early if `null`, otherwise sends with `browser.runtime.sendMessage(message).catch(() => {})`. The `.catch(() => {})` is deliberate and silent: a rejected promise here (e.g. "Extension context invalidated" after a dev-mode reload, or the background worker not yet awake) would otherwise surface as an unhandled promise rejection in **the page's own console**, violating M7's "no console errors" check; logging it would violate the same check for a different reason and gives the user nothing actionable.
+- No defensive error handling around `normalizeOrigin(location.href)` or `document.forms`: the content script's `matches: ['http://*/*', 'https://*/*']` is a browser-enforced injection gate, so `main()` provably only ever runs on a document whose URL the browser already parsed as `http:`/`https:` to inject the script at all — `new URL(location.href)` cannot hit a parse failure at this call site, and `document.forms` is a live `HTMLCollection`, never null/throwing.
+
+##### Testing gap closed: `jsdom` was not installed
+
+Confirmed during implementation that neither `jsdom` nor `happy-dom` was a dependency, and `vitest.config.ts` set no `test.environment` (Vitest's default is `node`, no DOM globals) — so the plan's own "unit test against a JSDOM fixture" acceptance line could not have run before this milestone. Added `jsdom` (not `happy-dom`, matching the plan's own wording and jsdom's more spec-faithful `HTMLFormElement.elements`/IDL-attribute-defaulting behavior) as an exact-pinned devDependency (`"jsdom": "30.0.1"`, matching this project's precedent for test-infrastructure packages like `vitest`/`@biomejs/biome`). The environment is opted into **per-file**, via a `// @vitest-environment jsdom` docblock at the top of the one new test file — not globally in `vitest.config.ts` — so every other (DOM-free) test file stays on the faster `node` default.
+
+##### A real Biome finding worth recording
+
+`lint/style/noNonNullAssertion` **is** part of Biome's `recommended` preset (as a warning, "Unsafe fix: Replace with optional chain operator") — an earlier planning pass had checked this and concluded it wasn't enabled, which was wrong. All non-null assertions (`forms[0]!`) in the new test file were rewritten as optional chains (`forms[0]?.fields`, `fields?.[0]?.name`) instead, which is both what Biome recommends and arguably better test hygiene: if a fixture-guaranteed index turned out to be missing, the assertion fails on a clear value mismatch (e.g. `undefined` where a string was expected) rather than throwing inside the test body.
+
+##### Test coverage (8 new tests, 33 total)
+
+`tests/unit/content/formDetection.test.ts` (`// @vitest-environment jsdom`), covering: a required email input (all five `DetectedField` properties); a field with neither `name` nor `id` (both come back `null`); two forms on one page (correct `formIndex` each, fields don't bleed across forms); a `<select>` and a `<textarea>` (`tagName` lowercased, `type` is `null` for both); a `<button>` inside a form (filtered out of `fields`); a page with zero forms (`extractForms` → `[]`); `buildFormDetectedMessage` returning `null` for zero forms; and a full `buildFormDetectedMessage` assertion confirming the origin gets normalized (`https://Example.com:443/login?next=/home` → `https://example.com` in `payload.origin`, while `payload.url` keeps the original un-normalized string) and `detectedAt` passes through unchanged.
+
+##### Fixes from code review (`/code-review`, 5 findings, all fixed)
+
+- **`entrypoints/content.ts` — silent handler-failure loss.** The original `.catch(() => {})` only catches a *transport-level* rejection. `background/router/dispatch.ts` is deliberately built to never reject — even a handler failure resolves as `{ok:false, error}` — so a real failure (e.g. `recordFormDetection`'s `browser.storage.session.set` rejecting) was being silently dropped with zero trace, indistinguishable from a page with no form at all. Fixed by reading the resolved `MessageResponse` and `console.debug`-ing (not `warn`/`error`, to stay inside M7's "no console errors" line) when `ok` is `false`; `.catch()` now only covers the genuinely separate transport-failure case.
+- **`content/formDetection.ts` — tag-matching broke on XHTML documents.** `DETECTABLE_TAGS` compared against uppercase tag names (`'INPUT'`, etc.), which silently under-reports every field on a page served as `application/xhtml+xml` (where `Element.tagName` preserves source case, e.g. `'input'`) — no crash, just an empty `fields: []` for every form on that page. Fixed by reverting to `instanceof HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement` checks (the original research sketch's own approach, before this implementation introduced the tagName-matching detour), which don't depend on tag-name casing at all. This also resolved a separate, smaller finding for free: the union type was duplicated between `isDetectableField` and `extractField`; it's now one named `DetectableFieldElement` type used by both.
+- **`tests/unit/content/formDetection.test.ts` — duplicated `beforeEach`.** The identical `document.body.innerHTML = ''` reset was repeated in both `describe` blocks; hoisted to one file-level `beforeEach` outside both.
+- **This doc — wrong test count.** Said "12 new tests"; the file actually has 8 `it()` blocks (25 pre-existing + 8 = 33 total, which was already correct). Corrected above.
+
+Not fixed, noted as a deliberate trade-off: the XHTML-document scenario has no dedicated regression test, since reproducing it would require constructing a custom `jsdom.JSDOM` document with `contentType: 'application/xhtml+xml'` rather than the lightweight `// @vitest-environment jsdom` + `document.body.innerHTML` pattern the rest of this test file uses — a real cost for a content-type that's effectively extinct on the modern web. The `instanceof`-based fix is correct by construction regardless (it checks the DOM interface, not a string), so this is judged not worth the added test infrastructure for Phase 1.
+
 ### M5 — Popup UI
 
 - `entrypoints/popup/` (`index.html`, `main.ts`, `App.vue`, `style.css` with `@import 'tailwindcss';`).
@@ -283,6 +318,8 @@ identity-firewall-ext/
 │   ├── vault/index.ts              # STUB — Phase 2 fills this in
 │   ├── identity/index.ts           # STUB — Phase 2 fills this in
 │   └── firewall/index.ts           # STUB — Phase 3 fills this in
+├── content/
+│   └── formDetection.ts            # extractForms(), buildFormDetectedMessage() — pure, M4
 ├── shared/
 │   ├── messages.ts                 # Zod schemas + ExtensionMessage union
 │   └── origin.ts                   # normalizeOrigin() + CanonicalOrigin brand
