@@ -246,7 +246,7 @@ Biometrics authorize the release of sensitive data without the biometric data it
 - Controlled autofill.
 - Unique password per service.
 - Email aliases.
-- Optional integration with SimpleLogin/addy.io.
+- Optional integration with an email-alias provider — **SimpleLogin first** (its single-call random-alias endpoint and native `hostname` tagging field are the simplest fit for this flow), addy.io as a fast-follow via the same `AliasProvider` interface. See `docs/research/email-alias-integration.md`.
 - Compatibility across different form structures.
 - Detection of dynamically rendered pages.
 

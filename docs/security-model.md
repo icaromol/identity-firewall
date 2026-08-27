@@ -18,6 +18,12 @@ The reasoning is simple: cryptographic implementations are one of the easiest pl
 
 **Prior art, not a dependency:** the Attestto Creds Extension (a browser-based self-sovereign identity wallet) already validates that this exact pattern — Web Crypto API plus P-256 for signing, inside a Manifest V3 extension — works in production-shaped code. It is referenced here as evidence the approach is sound, and as a project worth studying for its architecture. It is explicitly **not** a runtime or build-time dependency of this project. See [competitive-landscape.md](competitive-landscape.md) for the fuller comparison of what is studied versus what is built from scratch.
 
+## Vault unlock key: derived, never stored
+
+The Vault's AES-GCM encryption key is never persisted at rest as itself — it's re-derived on every unlock and cached only in `chrome.storage.session` (RAM-only, cleared on browser close or explicit lock), the same pattern validated in production by Attestto (`docs/research/attestto-teardown.md`): a WebAuthn PRF-extension output is run through HKDF-SHA256 with a fixed `info` string and a random per-installation salt to produce the AES key, so the key material never touches persistent storage in derived form.
+
+This is a genuinely open design question, not yet a final decision, and worth resolving explicitly before Phase 2 (Local Identity Vault) locks in the vault's unlock path: Attestto deliberately dropped a passphrase-based fallback KDF for their *live* unlock path, reasoning that a passphrase-derived key is indistinguishable from a passkey-derived one and would make "passkey-protected" an unverifiable claim for their signature-centric product. Identity Firewall's vault does not carry that exact same claim, so a passphrase fallback (for devices/authenticators without PRF support, or for accessibility) may be a reasonable divergence — but if adopted, it should be a deliberate, documented choice (a new ADR), not an accidental one. Argon2id (not PRF/HKDF) remains the right KDF for any *offline backup export*, independent of this question, since a backup file has no live authenticator to derive a PRF from.
+
 ## Authentication: Passkeys / WebAuthn
 
 The project does not build its own authentication protocol. It builds on **WebAuthn/FIDO2 passkeys**, the existing web standard for public-key authentication:

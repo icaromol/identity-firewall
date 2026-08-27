@@ -42,13 +42,24 @@ Reddit identity
 
 Each derived identity comes with its own identifier, credentials, aliases, and passkeys — so github.com, reddit.com, and discord.com each see a distinct, non-correlatable identity, never the same one, and never the root.
 
-### The derivation math is intentionally not settled yet
+### The derivation function (finalized)
 
-The source design work is explicit that the exact derivation mechanism — something along the lines of an HMAC or KDF applied to the origin — **needs careful design**; this document does not claim a finalized construction. What is fixed, independent of the exact math, is the principle:
+> **Decision:** `ServiceIdentityKeySeed = HKDF-SHA256(ikm = RootSecret, salt = FixedAppSalt, info = normalizeOrigin(origin))`, and the resulting seed material deterministically seeds a per-origin ECDSA/Ed25519 keypair (via the Web Crypto API, per [security-model.md](security-model.md)/ADR-003). See [ADR-010](adr/ADR-010-identity-derivation-function.md) for the full record.
+
+This was deliberately **not** copied from Attestto. A source-level teardown (`docs/research/attestto-teardown.md`) found that Attestto's own "pairwise per-origin identity" is not a derivation at all: `generateSiteDid()` calls `crypto.subtle.generateKey()` to produce a **fresh, independently-random P-256 keypair per origin** and stores it forever in a `Record<origin, keypair>`, using the origin string purely as a storage/lookup key — never as KDF input. Attestto's own "root identity" is, for the same reason, just the first randomly-generated key, not a seed with any special mathematical relationship to the per-site ones.
+
+That generate-and-store approach is legitimate (it has a real unlinkability advantage: no shared mathematical structure between per-site keys, even under a worst-case KDF break), but it has a cost this project's principles don't want: **it has no recovery-from-root property.** If the vault backup is lost, every per-site identity is gone and must be re-minted from scratch, breaking continuity with every site ever used, and the per-origin key map grows linearly with every site visited — all of which has to be backed up.
+
+The derivation approach above keeps a property Attestto's design lacks: as long as the Root Identity and the origin string are known, the exact same Service Identity can be recomputed from the root alone, on a fresh device, with **no per-site backup at all** — only the root needs to survive a device loss. This is a better fit for this project's stated principles (local-first, root-holds-everything, minimal persisted state) than Attestto's own approach, which is why this project deliberately diverges from its closest reference project here rather than adopting it wholesale.
+
+Two implementation details carried over from the teardown as hard-won lessons rather than speculation:
+
+- **One canonical origin-normalization function, used everywhere an origin is a KDF `info` parameter or a storage key** (`protocol//host`, lowercased, punycoded, default ports stripped, non-default ports kept). Attestto's own codebase had **five independent copies** of this logic before consolidating into one branded type — worth getting right from day one rather than after the fact.
+- **HKDF's output is only unlinkable as long as the Root Secret stays secret and the same origin never trivially reveals the root** — this is a standard HKDF security property, not a novel one, but it's the load-bearing assumption behind calling per-origin outputs "statistically independent."
+
+What remains fixed, independent of any implementation detail, is the underlying principle:
 
 > **One identity per origin, and origins should not be able to correlate a user across sites.**
-
-This is a deliberately different approach from Attestto's `did:jwk` pairwise-per-origin identities. Attestto is a useful reference point for how a similar problem has already been solved in a shipped, open-source extension — see `docs/competitive-landscape.md` (sibling doc) — but its DID-based construction is something to study, not something this project commits to copying wholesale. The MVP is explicitly scoped to avoid pulling in full DID infrastructure (see [architecture.md](architecture.md) and `docs/roadmap.md`), so the near-term derivation mechanism will likely be simpler than a DID method, while preserving the same per-origin unlinkability property.
 
 ## What each identity level holds
 
@@ -69,10 +80,12 @@ Created for one specific origin (e.g. `github.com`, `reddit.com`, `discord.com`)
 - identifier
 - credentials
 - aliases
-- passkeys
+- passkeys *(see footnote below — reference, not custody, under the MVP's WebAuthn integration mode)*
 - history
 
 The full storage structure these live in is documented in [data-model.md](data-model.md); encryption at rest is covered in `docs/security-model.md` (sibling doc).
+
+> **Footnote on "passkeys":** under the MVP's chosen WebAuthn integration mode ([ADR-011](adr/ADR-011-webauthn-metadata-only-mode.md)), a Service Identity does not hold passkey private-key material the way it holds an alias or a password. It holds a *reference* — the relying-party ID and credential ID the user's real authenticator (OS platform authenticator, hardware key, or another password manager) already manages — for our own bookkeeping of "which Service Identity does this credential belong to." The private key itself never enters this vault; it lives in the OS/hardware authenticator, exactly as WebAuthn intends. A later phase could adopt full custody (the extension becomes its own software WebAuthn authenticator, as Bitwarden/1Password do) — see `docs/research/webauthn-technical-notes.md` and ADR-011 for why that's a materially larger, explicitly deferred scope, not the MVP's default.
 
 ## Many accounts, minimal disclosure
 

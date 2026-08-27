@@ -77,6 +77,17 @@ Walking the pipeline:
 
 From the site's point of view, this looks like an ordinary account being created — it never has to know this system exists. That's the point: value is delivered on day one, on the web as it exists today, without waiting for any site to adopt anything.
 
+### WebAuthn integration mode: metadata-only for the MVP
+
+Source-grounded research (`docs/research/webauthn-technical-notes.md`) settled a question this document previously left implicit: **can the extension actually "orchestrate" a passkey per Service Identity, and if so, how?** Two real, standards-based options exist:
+
+- **Option A — metadata-only (chosen for the MVP, see [ADR-011](adr/ADR-011-webauthn-metadata-only-mode.md)):** the extension never intercepts or holds passkey key material. When a site's own JavaScript calls `navigator.credentials.create()`/`get()`, the OS/platform authenticator (Windows Hello, Touch ID, a hardware key) or the user's existing password manager handles the real ceremony, exactly as it would without this extension installed. Our job shrinks to recording, per Service Identity, *which* `rp.id`/credential ID pairing exists — a reference, never a private key — plus nudging the user toward using a passkey when one is available.
+- **Option B — full custody (explicitly deferred):** the extension becomes its own software WebAuthn authenticator, generating and holding key material itself (a MAIN-world override of `navigator.credentials`, or Chrome's `chrome.webAuthenticationProxy`) — the same approach Bitwarden and 1Password ship today. This gives strict one-passkey-per-Service-Identity custody, but is a materially larger scope (CBOR/COSE encoding, sign-counter bookkeeping, a real race condition against other installed password managers under the MAIN-world approach, and a Chrome-only reliable path under the proxy approach) than "call an API and let the OS handle it."
+
+Option A is what "Credential Manager" means with respect to passkeys everywhere else in this document and in [identity-model.md](identity-model.md) — see the footnote there on what a Service Identity's "passkeys" field actually holds under this mode.
+
+One necessary correction to the legacy-mode pipeline below: **"does this site support WebAuthn" is not something the extension can ask the browser for free.** It can only be learned by being the interception layer (Option B) or by heuristically noticing a `navigator.credentials` call attempt / a "sign in with a passkey" UI element on the page. In practice this means the content script doesn't pre-classify a site as "legacy" vs. "WebAuthn-capable" up front — it falls through to password + alias generation whenever no WebAuthn ceremony materializes, on every page, every time.
+
 ### Native mode (future)
 
 Sites that later choose to adopt a Private Identity SDK get a more direct path — cryptographic proofs and selective disclosure instead of form-filling:
@@ -86,6 +97,17 @@ Website → SDK → Vault → cryptographic proof
 ```
 
 This mode is where authentication and identity are formally decoupled (see the Authentication vs. Identity section in [architecture.md](architecture.md)), and where claim-based disclosures like "age over 18" without a birth date become possible. The SDK's API shape, protocol design, and adoption path are owned by `docs/interoperability.md` (sibling doc) — this document only notes where native mode sits relative to the legacy pipeline above: legacy mode is the default for essentially all of the web at launch, and native mode is additive, not a replacement it depends on.
+
+## Engineering lessons carried over from the Attestto teardown
+
+A source-level teardown of Attestto (`docs/research/attestto-teardown.md`) surfaced several implementation lessons worth adopting from day one rather than rediscovering the expensive way, since Attestto's own commit history documents having hit each of these as real, shipped bugs:
+
+- **Design the message-passing router as capability-scoped from the start**, not a single giant `switch` over message-type strings. Attestto's own background script grew into a ~1,300-line switch before being refactored into a dispatch/composition-root pattern mid-project — cheaper to start with the smaller pattern than to retrofit it later.
+- **Any pending-approval state (an authorization prompt waiting on the user) must be persisted to `chrome.storage.session`, never held in an in-memory variable.** MV3 can kill the background service worker after ~30 seconds idle; an in-memory `Map` of pending approvals loses its rows exactly when a user's "Approve" click arrives for a worker that no longer remembers the request.
+- **Liveness/presence enforcement for a signature must live in a document context that can actually call WebAuthn/biometric APIs (e.g. the approval popup), never in the background service worker** — `navigator.credentials` doesn't exist there at all, making any background-side "proof of a live human" gate structurally decorative.
+- **If a public/unencrypted metadata mirror is kept alongside the encrypted vault for fast, unlock-free reads, make it structurally impossible to update one without the other** (a single write path, or derive the mirror on read) rather than relying on developer discipline — Attestto's own two-vault split caused real "stale UI" bugs from a forgotten sync call.
+- **Never let "trust an origin" silently expand into "auto-approve whatever that origin asks for next."** Attestto shipped exactly this as a trust-on-first-use optimization and reverted it after a security review; the corrected rule in its own operating notes is blunt: *"There is never an auto-accept. Literally never."* This is precisely the distinction the Policy Engine and Identity Firewall exist to enforce, so it's worth stating as an explicit constraint here too.
+- **If a secret-sharing recovery scheme (e.g. Shamir) is ever built, split a random wrapping key that encrypts a full backup blob — never split the identity's raw private key directly.** Attestto's own first attempt split the bare signing key and shipped a real, named failure mode (a recovering user got a working signer with no credentials attached to present with it); their corrected design splits a disposable wrapping key instead.
 
 ## Technology stack
 

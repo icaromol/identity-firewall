@@ -13,6 +13,7 @@ Vault
 ├── ServiceIdentities (one entry per origin, e.g. github.com, reddit.com, discord.com)
 ├── Credentials
 ├── Aliases
+├── AliasProviderConfig (optional — see below)
 ├── Policies
 └── PrivacyLedger
 ```
@@ -21,7 +22,8 @@ Vault
 - **PersonalData** — the user's actual attributes (name, email, phone, CPF/national ID, address, birth date). This is the pool that gets selectively, explicitly disclosed — never handed over wholesale.
 - **ServiceIdentities** — one entry per origin. Each holds the identifier, credentials, aliases, passkeys, and history for that specific site, as defined in [identity-model.md](identity-model.md).
 - **Credentials** — passwords and passkeys, scoped per service identity.
-- **Aliases** — generated substitute values (email aliases, usernames, etc.) used in place of real personal data where appropriate.
+- **Aliases** — generated substitute values (email aliases, usernames, etc.) used in place of real personal data where appropriate. An email alias entry round-trips the fields a real alias provider actually needs: `provider` (e.g. `simplelogin`, `addy`, or `none`), `providerAliasId` (the provider's own ID, needed to later toggle/delete it), `value` (the alias address itself), and `note`/`hostname` (the site it was minted for — SimpleLogin has a native `hostname` field for exactly this; addy.io does not, so we own that tagging convention ourselves via its `description` field). See `docs/research/email-alias-integration.md` for the full provider comparison.
+- **AliasProviderConfig** — optional, user-supplied configuration for an email-alias provider: `provider` (`none` by default), the user's own API key for that provider, and an optional base URL override to support a self-hosted instance. This key is never sent anywhere except directly from the user's browser to the provider endpoint the user themselves configured — see the "our server vs. the user's own chosen third party" distinction in [ADR-007](adr/ADR-007-no-server-dependency.md).
 - **Policies** — the rules that decide, per field and per sensitivity level, whether to auto-allow, alias, ask, or deny. The engine that applies these lives in `docs/privacy-model.md` (sibling doc); this document only defines the data those policies act on.
 - **PrivacyLedger** — a local (never blockchain) log of what each site requested, what was disclosed, what was denied, and how the disclosure was authorized. Its behavior is detailed in `docs/privacy-model.md` (sibling doc).
 
@@ -34,7 +36,7 @@ Every attribute the vault might hold is assigned a sensitivity level, and each l
 | Level | Examples | Default behavior |
 |---|---|---|
 | **Public** | country, language, timezone | Allow automatically |
-| **Private** | email, username | Alias |
+| **Private** | email, username | Alias, if an alias provider is configured (`AliasProviderConfig.provider != "none"`); otherwise Ask |
 | **Sensitive** | full name, phone, address | Ask |
 | **Highly Sensitive** | national ID/CPF, official documents, financial information | Ask + require biometric authorization |
 

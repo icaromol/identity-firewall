@@ -84,7 +84,7 @@ Full rationale: `docs/browser-architecture.md`.
 
 Full comparison: `docs/competitive-landscape.md`.
 
-- **Attestto** (attestto-creds-extension) — study its architecture and decisions closely (vault structure, pairwise per-origin identity, field-level consent, Web Crypto usage). Do not fork it or depend on it.
+- **Attestto** (attestto-creds-extension) — study its architecture and decisions closely (vault structure, field-level consent, Web Crypto usage, MV3 lifecycle lessons — see `docs/research/attestto-teardown.md` for a real source-level teardown). Do not fork it or depend on it. Note: its pairwise-per-origin identities turned out to be random-generate-and-store, not a root-derived scheme — this project's own identity derivation (ADR-010) was designed independently, not adapted from Attestto's construction.
 - **SimpleLogin / addy.io** — integrate via their API for email aliasing. Do not rebuild an email/SMTP/DNS stack.
 - **WebAuthn** — use directly as the authentication substrate. Do not invent an alternative authentication ceremony.
 - **AltMe / DID / VC** — study for future interoperability concepts only. Do not implement DID/VC infrastructure in the MVP (see `docs/adr/ADR-008-defer-did-vc-sdk.md`).
@@ -122,5 +122,6 @@ See `docs/adr/` for the full reasoning behind each:
 - `docs/interoperability.md` — legacy vs. native mode, the four-phase evolution, SD-JWT/selective-disclosure plan, deferred DID/VC, the future Private Login Protocol and SDK sketch, and why no blockchain.
 - `docs/competitive-landscape.md` — survey of prior art (Attestto, SimpleLogin, addy.io, AltMe, Justitia, WebAuthn) and what to reuse vs. build.
 - `docs/roadmap.md` — the phase-by-phase build plan (Phase 0–12), MVP scope checklists, and the strategic sequence/horizon.
-- `docs/adr/` — 9 Architecture Decision Records (ADR-001 through ADR-009) covering local-first, browser-extension distribution, Web Crypto, pairwise service identities, biometrics-as-unlock, no-blockchain, no-server-dependency, deferred DID/VC/SDK, and the personal-project-not-startup pivot.
+- `docs/adr/` — 11 Architecture Decision Records (ADR-001 through ADR-011) covering local-first, browser-extension distribution, Web Crypto, pairwise service identities, biometrics-as-unlock, no-blockchain, no-server-dependency, deferred DID/VC/SDK, the personal-project-not-startup pivot, the finalized HKDF-based identity derivation function, and the metadata-only WebAuthn integration mode.
 - `docs/archive/business-context.md` — historical, pre-pivot startup framing (market sizing, personas-as-customers, investors, GTM). Not active guidance.
+- `docs/research/` — source-grounded technical research done ahead of Phase 1 implementation: `attestto-teardown.md` (a real clone-and-read teardown of Attestto's source, the basis for ADR-010 and ADR-011), `webauthn-technical-notes.md` (what a browser extension can and can't actually do with the WebAuthn API), `email-alias-integration.md` (SimpleLogin vs. addy.io API integration plan). Treat these as grounding evidence for the ADRs and doc edits that cite them, not as a parallel spec — if a research doc and a main doc/ADR ever disagree, the main doc/ADR is current; the research doc explains why it says what it says.
