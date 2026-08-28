@@ -319,4 +319,12 @@ describe('backup messages', () => {
     });
     expect(result.success).toBe(false);
   });
+
+  it('rejects a bundle with Argon2 parameters above the ceiling', () => {
+    const result = VaultBackupBundleSchema.safeParse({
+      ...validBundle,
+      kdfParams: { t: 4_294_967_295, m: 19456, p: 1 },
+    });
+    expect(result.success).toBe(false);
+  });
 });

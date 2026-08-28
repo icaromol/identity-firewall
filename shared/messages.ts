@@ -11,7 +11,7 @@
 // POLICY_DECISION, etc. still belong to Phase 3/4 and aren't here yet.
 
 import { z } from 'zod';
-import { CredentialRecordSchema, PersonalDataSchema } from './vault-schema';
+import { Argon2ParamsSchema, CredentialRecordSchema, PersonalDataSchema } from './vault-schema';
 
 export const DetectedFieldSchema = z.object({
   tagName: z.enum(['input', 'textarea', 'select']),
@@ -146,12 +146,9 @@ export const DeleteCredentialMessageSchema = z.object({
 export type DeleteCredentialMessage = z.infer<typeof DeleteCredentialMessageSchema>;
 
 // --- Popup -> Background: secure export / local backup ---
-export const Argon2ParamsSchema = z.object({
-  t: z.number().int().positive(), // iterations
-  m: z.number().int().positive(), // memory, KiB
-  p: z.number().int().positive(), // parallelism
-});
-export type Argon2Params = z.infer<typeof Argon2ParamsSchema>;
+// Argon2ParamsSchema itself now lives in vault-schema.ts (M2) -- also
+// referenced by RootIdentitySchema.passphraseArgon2Params, not just this
+// backup bundle.
 
 export const VaultBackupBundleSchema = z.object({
   formatVersion: z.literal(1),

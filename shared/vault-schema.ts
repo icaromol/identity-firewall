@@ -20,6 +20,26 @@ export type SensitivityLevel = z.infer<typeof SensitivityLevelSchema>;
 export const ResponseTypeSchema = z.enum(['real', 'alias', 'synthetic', 'nonsense', 'deny']);
 export type ResponseType = z.infer<typeof ResponseTypeSchema>;
 
+// --- Argon2id parameters (ADR-012) ---
+// Lives here, not shared/messages.ts, so RootIdentitySchema below can
+// reference it without messages.ts's schemas creating a circular import
+// (messages.ts already imports several schemas FROM this file).
+//
+// Upper bounds matter here, not just lower ones: this schema validates
+// VaultBackupBundle.kdfParams (shared/messages.ts) at RESTORE_VAULT_BACKUP's
+// untrusted-input boundary. Without a ceiling, a corrupted or malicious
+// backup file's kdfParams could force an effectively unbounded Argon2id
+// computation (@noble/hashes's own maxmem default caps runaway `m`, but
+// nothing caps `t` or `p`) instead of failing validation fast. Bounds below
+// are generous relative to DEFAULT_ARGON2_PARAMS (t=2, m=19456, p=1) while
+// still ruling out a pathological value.
+export const Argon2ParamsSchema = z.object({
+  t: z.number().int().positive().max(10), // iterations
+  m: z.number().int().positive().max(1_048_576), // memory, KiB (<= 1 GiB)
+  p: z.number().int().positive().max(16), // parallelism
+});
+export type Argon2Params = z.infer<typeof Argon2ParamsSchema>;
+
 // --- RootIdentity ---
 // rootSecretB64 is the HKDF ikm for every Service Identity derivation
 // (ADR-010) -- generated once at setup (M4), encrypted at rest as part of
@@ -31,6 +51,13 @@ export type ResponseType = z.infer<typeof ResponseTypeSchema>;
 export const RootIdentitySchema = z.object({
   rootSecretB64: z.string(),
   createdAt: z.number(), // epoch ms
+  // Only present when passphrase-unlock is configured (M4 populates it).
+  // Recorded per-vault, not read from a hardcoded default, so retuning
+  // Argon2's cost parameters in a later release never silently strands an
+  // existing vault's passphrase unlock -- the same problem FixedAppSalt's
+  // "never regenerate" rule solves for HKDF's salt, applied to Argon2's
+  // cost dial instead (ADR-012).
+  passphraseArgon2Params: Argon2ParamsSchema.optional(),
 });
 export type RootIdentity = z.infer<typeof RootIdentitySchema>;
 

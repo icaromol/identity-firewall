@@ -1,0 +1,2 @@
+minimumReleaseAgeExclude:
+  - '@noble/hashes@2.4.0'
