@@ -6,12 +6,13 @@ import {
   getCachedUnlockKey,
   getConfiguredUnlockMethod,
   getPassphraseArgon2Params,
-  readVaultData,
+  readPersonalDataBlob,
+  readVaultIndex,
   VaultAlreadyInitializedError,
 } from '../../../../background/vault/storage';
 import { bytesToBase64 } from '../../../../shared/bytes';
 import type { UnlockInput } from '../../../../shared/messages';
-import type { VaultData } from '../../../../shared/vault-schema';
+import type { VaultIndex } from '../../../../shared/vault-schema';
 
 const passkeyInput: UnlockInput = {
   unlockMethod: 'passkey',
@@ -36,9 +37,10 @@ describe('createRootIdentity', () => {
     expect(await getCachedUnlockKey()).not.toBeNull();
     expect(await getConfiguredUnlockMethod()).toBe('passkey');
 
-    const data = await readVaultData();
-    expect(data.schemaVersion).toBe(1);
-    expect(data.rootIdentity.rootSecretB64).toEqual(expect.any(String));
+    const index = await readVaultIndex();
+    expect(index.schemaVersion).toBe(1);
+    expect(index.rootIdentity.rootSecretB64).toEqual(expect.any(String));
+    expect(await readPersonalDataBlob()).toEqual({});
   });
 
   it('creates a vault via the passphrase path and leaves it unlocked', async () => {
@@ -48,8 +50,8 @@ describe('createRootIdentity', () => {
     expect(await getConfiguredUnlockMethod()).toBe('passphrase');
     expect(await getPassphraseArgon2Params()).toBeDefined();
 
-    const data = await readVaultData();
-    expect(data.schemaVersion).toBe(1);
+    const index = await readVaultIndex();
+    expect(index.schemaVersion).toBe(1);
   });
 
   it('throws VaultAlreadyInitializedError on a second call and leaves the first vault untouched', async () => {
@@ -73,20 +75,23 @@ describe('persistNewVault', () => {
     fakeBrowser.reset();
   });
 
-  it('persists a caller-provided VaultData (standing in for a future restored backup)', async () => {
-    const providedVaultData: VaultData = {
+  it('persists a caller-provided VaultIndex (standing in for a future restored backup)', async () => {
+    const providedIndex: VaultIndex = {
       schemaVersion: 1,
       rootIdentity: { rootSecretB64: bytesToBase64(randomBytes(32)), createdAt: 12345 },
-      personalData: { email: 'alice@example.com' },
       serviceIdentities: {},
       aliasProviderConfig: { provider: 'none' },
       policies: [],
       privacyLedger: [],
     };
 
-    await persistNewVault(providedVaultData, passphraseInput);
+    await persistNewVault(providedIndex, passphraseInput);
 
-    const data = await readVaultData();
-    expect(data).toEqual(providedVaultData);
+    const index = await readVaultIndex();
+    expect(index).toEqual(providedIndex);
+    // persistNewVault always initializes an EMPTY personal-data blob --
+    // restoring REAL personal data from a backup is Step 7's job, not this
+    // function's (see this file's own header comment for why).
+    expect(await readPersonalDataBlob()).toEqual({});
   });
 });

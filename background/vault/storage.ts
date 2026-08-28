@@ -413,6 +413,16 @@ export async function readVaultIndex(): Promise<VaultIndex> {
   return readEncryptedBlob(VAULT_INDEX_STORAGE_KEY, VaultIndexSchema, key);
 }
 
+// Takes an EXPLICIT key rather than the cached one -- mirrors
+// decryptVaultDataWithKey above exactly, for the same reason: unlockVault
+// (background/vault/unlock.ts) needs to verify a freshly-derived,
+// not-yet-cached key by attempting to decrypt with it BEFORE caching
+// anything, so it can't go through readVaultIndex's getCachedUnlockKey()
+// gate (there's nothing cached yet at that point in the ceremony).
+export async function decryptVaultIndexWithKey(key: CryptoKey): Promise<VaultIndex> {
+  return readEncryptedBlob(VAULT_INDEX_STORAGE_KEY, VaultIndexSchema, key);
+}
+
 // --- Tier 2: Personal data ---
 
 const personalDataQueue = createSerialQueue();

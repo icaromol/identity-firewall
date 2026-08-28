@@ -5,26 +5,25 @@ import { deriveVaultUnlockKey } from '../../../../background/vault/keys';
 import { getOrCreateFixedAppSalt } from '../../../../background/vault/salt';
 import {
   getCachedUnlockKey,
-  initializeVaultData,
+  initializeVaultIndex,
   setPassphraseArgon2Params,
   VaultLockedError,
   VaultNotInitializedError,
-  vaultBlobExists,
+  vaultIndexExists,
 } from '../../../../background/vault/storage';
 import { lockVault, requireUnlocked, unlockVault } from '../../../../background/vault/unlock';
 import { bytesToBase64 } from '../../../../shared/bytes';
 import type { UnlockInput } from '../../../../shared/messages';
-import type { VaultData } from '../../../../shared/vault-schema';
+import type { VaultIndex } from '../../../../shared/vault-schema';
 
 // Cheap params so unlockVault's Argon2id call stays fast in tests.
 const CHEAP_ARGON2_PARAMS = { t: 1, m: 8, p: 1 };
 const PASSPHRASE = 'correct horse battery staple';
 
-function minimalVaultData(): VaultData {
+function minimalVaultIndex(): VaultIndex {
   return {
     schemaVersion: 1,
     rootIdentity: { rootSecretB64: 'c2VjcmV0', createdAt: Date.now() },
-    personalData: {},
     serviceIdentities: {},
     aliasProviderConfig: { provider: 'none' },
     policies: [],
@@ -45,7 +44,7 @@ async function setUpPassphraseVault(): Promise<void> {
     CHEAP_ARGON2_PARAMS,
   );
   const key = await generateAesGcmKeyFromBits(bits);
-  await initializeVaultData(minimalVaultData(), key);
+  await initializeVaultIndex(minimalVaultIndex(), key);
 }
 
 describe('unlockVault / lockVault / requireUnlocked', () => {
@@ -65,7 +64,7 @@ describe('unlockVault / lockVault / requireUnlocked', () => {
     const fixedAppSalt = await getOrCreateFixedAppSalt();
     const bits = await deriveVaultUnlockKey(passkeyInput, fixedAppSalt);
     const key = await generateAesGcmKeyFromBits(bits);
-    await initializeVaultData(minimalVaultData(), key);
+    await initializeVaultIndex(minimalVaultIndex(), key);
 
     const data = await unlockVault(passkeyInput);
     expect(data.schemaVersion).toBe(1);
@@ -125,9 +124,9 @@ describe('unlockVault / lockVault / requireUnlocked', () => {
       customParams,
     );
     const key = await generateAesGcmKeyFromBits(bits);
-    await initializeVaultData(minimalVaultData(), key);
+    await initializeVaultIndex(minimalVaultIndex(), key);
 
-    expect(await vaultBlobExists()).toBe(true);
+    expect(await vaultIndexExists()).toBe(true);
     const data = await unlockVault({ unlockMethod: 'passphrase', passphrase: PASSPHRASE });
     expect(data.schemaVersion).toBe(1);
   });

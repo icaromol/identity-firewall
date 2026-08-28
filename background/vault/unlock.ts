@@ -3,17 +3,22 @@
 // requireUnlocked (the guard every M4+ handler that needs decrypted content
 // calls first). Imports only from storage.ts, keys.ts, and salt.ts -- never
 // touches browser.storage.* directly itself.
+//
+// unlockVault verifies by decrypting the INDEX tier now, not the old
+// whole-blob (ADR-015, vault tiering refactor Step 4) -- smaller and
+// faster to decrypt, a nice side effect of the tiering refactor rather than
+// something this function had to earn on its own.
 
 import type { UnlockInput } from '../../shared/messages';
-import type { VaultData } from '../../shared/vault-schema';
+import type { VaultIndex } from '../../shared/vault-schema';
 import { generateAesGcmKeyFromBits } from './crypto';
 import { deriveVaultUnlockKey } from './keys';
 import { getOrCreateFixedAppSalt } from './salt';
 import {
   clearCachedUnlockKey,
-  decryptVaultDataWithKey,
+  decryptVaultIndexWithKey,
   getPassphraseArgon2Params,
-  readVaultData,
+  readVaultIndex,
   setCachedUnlockKey,
 } from './storage';
 
@@ -24,7 +29,7 @@ import {
 // resulting key fails AES-GCM's authentication tag exactly the same way a
 // genuinely wrong passphrase would. The two cases are cryptographically
 // indistinguishable from decrypt's point of view by construction (ADR-012).
-export async function unlockVault(input: UnlockInput): Promise<VaultData> {
+export async function unlockVault(input: UnlockInput): Promise<VaultIndex> {
   // The two reads are independent -- run them concurrently rather than
   // paying two sequential browser.storage.local round-trips before the
   // (already expensive) Argon2id derivation even starts.
@@ -36,9 +41,9 @@ export async function unlockVault(input: UnlockInput): Promise<VaultData> {
   const key = await generateAesGcmKeyFromBits(bits);
   // Verify correctness BEFORE caching anything -- a wrong passphrase/PRF
   // output must never pollute the session cache with an unusable key.
-  const data = await decryptVaultDataWithKey(key);
+  const index = await decryptVaultIndexWithKey(key);
   await setCachedUnlockKey(bits);
-  return data;
+  return index;
 }
 
 export async function lockVault(): Promise<void> {
@@ -46,7 +51,11 @@ export async function lockVault(): Promise<void> {
 }
 
 // An alias, not a reimplementation -- requireUnlocked and storage.ts's own
-// readVaultData are the exact same "get cached key, throw VaultLockedError
-// if absent, decrypt" guard. Delegating keeps there being exactly one
-// implementation to keep correct.
-export const requireUnlocked = readVaultData;
+// readVaultIndex are the exact same "get cached key, throw VaultLockedError
+// if absent, decrypt" guard, now against the index tier. Delegating keeps
+// there being exactly one implementation to keep correct. Confirmed unused
+// by any real capability module (only this file's own test imports it) --
+// kept as a documented, working alias anyway, matching its own prior
+// history (M5/M6 already found it unused in favor of importing the
+// underlying storage.ts function directly).
+export const requireUnlocked = readVaultIndex;
