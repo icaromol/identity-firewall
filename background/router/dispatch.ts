@@ -4,9 +4,10 @@
 // that would never come, indistinguishable from a user walking away"
 // (docs/research/attestto-teardown.md §7/§8.3). Every code path through
 // handleRuntimeMessage ends in exactly one sendResponse call: the
-// schema-rejection branch returns synchronously, and the .then/.catch
-// pair are mutually exclusive outcomes of the same promise -- nothing can
-// call sendResponse twice or zero times.
+// schema-rejection and no-handler-registered branches both return
+// synchronously, and the .then/.catch pair are mutually exclusive
+// outcomes of the same promise -- nothing can call sendResponse twice or
+// zero times.
 //
 // handleRuntimeMessage is exported separately from installMessageRouter so
 // it can be unit-tested directly, without depending on the fidelity of a
@@ -32,6 +33,14 @@ export function handleRuntimeMessage(
 
   const message = parsed.data;
   const entry = registry[message.type];
+
+  if (!entry) {
+    // Reply path #4: a schema-valid message type with no registered
+    // handler yet (Phase 2's message types land ahead of their handlers,
+    // M2-M7). Always synchronous, always fires.
+    sendResponse({ ok: false, error: 'NOT_IMPLEMENTED' });
+    return false;
+  }
 
   entry
     .handle(message as never, { sender })

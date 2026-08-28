@@ -37,6 +37,18 @@ describe('handleRuntimeMessage', () => {
     expect(responses).toEqual([{ ok: false, error: 'INVALID_MESSAGE' }]);
   });
 
+  it('replies NOT_IMPLEMENTED synchronously for a schema-valid type with no registered handler', () => {
+    const responses: MessageResponse[] = [];
+    const keepChannelOpen = handleRuntimeMessage(
+      { type: 'VAULT_STATUS' },
+      {} as never,
+      (response) => responses.push(response),
+    );
+
+    expect(keepChannelOpen).toBe(false);
+    expect(responses).toEqual([{ ok: false, error: 'NOT_IMPLEMENTED' }]);
+  });
+
   it('produces exactly one error response when the handler throws, never zero and never two', async () => {
     vi.spyOn(fakeBrowser.storage.session, 'get').mockRejectedValueOnce(new Error('boom'));
 

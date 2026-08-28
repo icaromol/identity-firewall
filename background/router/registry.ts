@@ -21,12 +21,18 @@ export interface HandlerContext {
 
 type Handler<M extends ExtensionMessage> = (message: M, ctx: HandlerContext) => Promise<unknown>;
 
-type Registry = {
+// Partial: Phase 2's message types (shared/messages.ts) land in the union
+// ahead of their handlers (M2-M7 build those). A type missing from this
+// registry isn't a compile error -- dispatch.ts's `entry` check turns it
+// into a runtime NOT_IMPLEMENTED response instead, so the message
+// contract can be written and tested (M1) independently of the handlers
+// that will eventually satisfy it.
+type Registry = Partial<{
   [K in ExtensionMessage['type']]: {
     capability: Capability;
     handle: Handler<Extract<ExtensionMessage, { type: K }>>;
   };
-};
+}>;
 
 export const registry: Registry = {
   FORM_DETECTED: {
