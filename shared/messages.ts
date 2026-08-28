@@ -11,7 +11,7 @@
 // POLICY_DECISION, etc. still belong to Phase 3/4 and aren't here yet.
 
 import { z } from 'zod';
-import type { ServiceIdentityRecord } from './vault-schema';
+import type { CredentialRecord, PersonalData, ServiceIdentityRecord } from './vault-schema';
 import { Argon2ParamsSchema, CredentialRecordSchema, PersonalDataSchema } from './vault-schema';
 
 export const DetectedFieldSchema = z.object({
@@ -234,3 +234,17 @@ export interface VaultStatusResponse {
 // a backup restore, which requires the full record (M5).
 export type GetServiceIdentityResponse = ServiceIdentityRecord | null;
 export type CreateServiceIdentityResponse = ServiceIdentityRecord;
+
+// GET_PERSONAL_DATA/SET_PERSONAL_DATA and GET_CREDENTIAL/SAVE_CREDENTIAL/
+// DELETE_CREDENTIAL's response payload shapes (background/vault/
+// personalData/handler.ts, background/vault/credentials/handler.ts), same
+// direct-alias convention as GetServiceIdentityResponse above (M6).
+// GetCredentialResponse is an array, not a single record -- GET_CREDENTIAL's
+// payload carries no `kind`, so it can only mean "every credential stored
+// for this origin" (0-2 entries, per the at-most-one-per-kind constraint on
+// ServiceIdentityRecordSchema.credentials).
+export type GetPersonalDataResponse = PersonalData;
+export type SetPersonalDataResponse = PersonalData;
+export type GetCredentialResponse = CredentialRecord[];
+export type SaveCredentialResponse = CredentialRecord;
+export type DeleteCredentialResponse = undefined;

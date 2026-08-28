@@ -38,12 +38,13 @@ describe('handleRuntimeMessage', () => {
   });
 
   it('replies NOT_IMPLEMENTED synchronously for a schema-valid type with no registered handler', () => {
-    // GET_PERSONAL_DATA is still unregistered (M6) -- GET_SERVICE_IDENTITY
-    // used to be this test's example, but M5 gave it a real handler (VAULT_STATUS
-    // was the example before that, until M4 gave IT a real handler).
+    // EXPORT_VAULT_BACKUP is still unregistered (M7) -- GET_PERSONAL_DATA
+    // used to be this test's example, but M6 gave it a real handler
+    // (GET_SERVICE_IDENTITY was the example before that, until M5 gave IT a
+    // real handler; VAULT_STATUS before that, until M4).
     const responses: MessageResponse[] = [];
     const keepChannelOpen = handleRuntimeMessage(
-      { type: 'GET_PERSONAL_DATA' },
+      { type: 'EXPORT_VAULT_BACKUP', payload: { backupPassphrase: 'irrelevant' } },
       {} as never,
       (response) => responses.push(response),
     );

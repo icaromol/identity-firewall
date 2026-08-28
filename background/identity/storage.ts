@@ -5,7 +5,7 @@
 import { base64ToBytes } from '../../shared/bytes';
 import type { CanonicalOrigin } from '../../shared/origin';
 import type { ServiceIdentityRecord } from '../../shared/vault-schema';
-import { readVaultData, updateVaultData } from '../vault/storage';
+import { readVaultData, updateVaultDataWithResult } from '../vault/storage';
 import { deriveServiceIdentityKeypair } from './derive';
 
 export async function getServiceIdentity(
@@ -40,12 +40,11 @@ export async function createServiceIdentity(
   // never wrote. The in-mutator existence check below also covers the race
   // between the fast-path check above and this write actually landing (a
   // concurrent create for the same origin completing in between).
-  let result: ServiceIdentityRecord | undefined;
-  await updateVaultData((draft) => {
+  return updateVaultDataWithResult((draft) => {
     const existingInDraft = draft.serviceIdentities[origin];
     if (existingInDraft) {
-      result = existingInDraft; // idempotent: preserve its original createdAt/credentials/aliases
-      return draft;
+      // idempotent: preserve its original createdAt/credentials/aliases
+      return { next: draft, result: existingInDraft };
     }
     const record: ServiceIdentityRecord = {
       origin,
@@ -55,14 +54,9 @@ export async function createServiceIdentity(
       aliases: [],
       history: [],
     };
-    result = record;
-    return { ...draft, serviceIdentities: { ...draft.serviceIdentities, [origin]: record } };
+    return {
+      next: { ...draft, serviceIdentities: { ...draft.serviceIdentities, [origin]: record } },
+      result: record,
+    };
   });
-
-  if (!result) {
-    // Unreachable in practice -- the mutator always assigns result on both
-    // branches before returning. A thrown invariant, not a `!` assertion.
-    throw new Error('createServiceIdentity: mutator did not assign a result');
-  }
-  return result;
 }

@@ -163,6 +163,33 @@ export function updateVaultData(mutator: (draft: VaultData) => VaultData): Promi
   });
 }
 
+// A variant of updateVaultData for mutators that also need to hand a value
+// back to their caller (e.g. "the record that was created or already
+// existed"). Introduced at M6 once a third near-identical
+// `let result: T | undefined; ...; if (!result) throw ...` block appeared
+// across background/identity/storage.ts, background/vault/credentials/
+// storage.ts, and background/vault/personalData/storage.ts (a /code-review
+// finding) -- factored into one place here rather than left as copy-pasted
+// convention across three files. Wrapping `result` in `{ result: T }` avoids
+// the `T | undefined` ambiguity a bare capture variable would have if some
+// future T were itself legitimately undefined.
+export async function updateVaultDataWithResult<T>(
+  mutator: (draft: VaultData) => { next: VaultData; result: T },
+): Promise<T> {
+  let captured: { result: T } | undefined;
+  await updateVaultData((draft) => {
+    const { next, result } = mutator(draft);
+    captured = { result };
+    return next;
+  });
+  if (!captured) {
+    // Unreachable in practice -- the mutator above always assigns captured
+    // before its own return.
+    throw new Error('updateVaultDataWithResult: mutator did not assign a result');
+  }
+  return captured.result;
+}
+
 export async function readVaultData(): Promise<VaultData> {
   const key = await getCachedUnlockKey();
   if (!key) {

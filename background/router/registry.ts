@@ -14,11 +14,17 @@ import { handleFormDetected } from '../formDetection/handler';
 import { handleCreateServiceIdentity, handleGetServiceIdentity } from '../identity/handler';
 import { handleGetOriginState, handleGetSessionState } from '../session/handler';
 import {
+  handleDeleteCredential,
+  handleGetCredential,
+  handleSaveCredential,
+} from '../vault/credentials/handler';
+import {
   handleCreateRootIdentity,
   handleVaultLock,
   handleVaultStatus,
   handleVaultUnlock,
 } from '../vault/handler';
+import { handleGetPersonalData, handleSetPersonalData } from '../vault/personalData/handler';
 
 export type Capability = 'formDetection' | 'session' | 'vault' | 'identity' | 'firewall';
 
@@ -77,5 +83,25 @@ export const registry: Registry = {
   CREATE_SERVICE_IDENTITY: {
     capability: 'identity',
     handle: (message) => handleCreateServiceIdentity(message),
+  },
+  GET_PERSONAL_DATA: {
+    capability: 'vault',
+    handle: (message) => handleGetPersonalData(message),
+  },
+  SET_PERSONAL_DATA: {
+    capability: 'vault',
+    handle: (message) => handleSetPersonalData(message),
+  },
+  GET_CREDENTIAL: {
+    capability: 'vault',
+    handle: (message) => handleGetCredential(message),
+  },
+  SAVE_CREDENTIAL: {
+    capability: 'vault',
+    handle: (message) => handleSaveCredential(message),
+  },
+  DELETE_CREDENTIAL: {
+    capability: 'vault',
+    handle: (message) => handleDeleteCredential(message),
   },
 };
