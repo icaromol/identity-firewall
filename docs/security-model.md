@@ -10,7 +10,7 @@ Everywhere the system needs a cryptographic operation, it uses the browser-nativ
 
 - key generation;
 - **AES-GCM** for symmetric encryption (the Vault's encryption-at-rest);
-- **ECDSA/EdDSA** (P-256 or equivalent, where supported) for signing;
+- **Ed25519** for signing (Service Identity keys — [ADR-014](adr/ADR-014-ed25519-key-derivation.md));
 - hashing;
 - a cryptographically secure random number generator (CSPRNG) wherever randomness is needed (e.g. generating alias values).
 

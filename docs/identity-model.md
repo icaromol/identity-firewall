@@ -44,7 +44,7 @@ Each derived identity comes with its own identifier, credentials, aliases, and p
 
 ### The derivation function (finalized)
 
-> **Decision:** `ServiceIdentityKeySeed = HKDF-SHA256(ikm = RootSecret, salt = FixedAppSalt, info = normalizeOrigin(origin))`, and the resulting seed material deterministically seeds a per-origin ECDSA/Ed25519 keypair (via the Web Crypto API, per [security-model.md](security-model.md)/ADR-003). See [ADR-010](adr/ADR-010-identity-derivation-function.md) for the full record.
+> **Decision:** `ServiceIdentityKeySeed = HKDF-SHA256(ikm = RootSecret, salt = FixedAppSalt, info = normalizeOrigin(origin))`, and the resulting seed material deterministically seeds a per-origin Ed25519 keypair (via the Web Crypto API, per [security-model.md](security-model.md)/ADR-003). See [ADR-010](adr/ADR-010-identity-derivation-function.md) for the derivation and [ADR-014](adr/ADR-014-ed25519-key-derivation.md) for why Ed25519 specifically (not ECDSA/P-256) and the exact import mechanism.
 
 This was deliberately **not** copied from Attestto. A source-level teardown (`docs/research/attestto-teardown.md`) found that Attestto's own "pairwise per-origin identity" is not a derivation at all: `generateSiteDid()` calls `crypto.subtle.generateKey()` to produce a **fresh, independently-random P-256 keypair per origin** and stores it forever in a `Record<origin, keypair>`, using the origin string purely as a storage/lookup key — never as KDF input. Attestto's own "root identity" is, for the same reason, just the first randomly-generated key, not a seed with any special mathematical relationship to the per-site ones.
 

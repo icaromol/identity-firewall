@@ -1,10 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fakeBrowser } from 'wxt/testing/fake-browser';
-import { getOrCreateFixedAppSalt } from '../../../../background/vault/salt';
 
 describe('getOrCreateFixedAppSalt', () => {
-  beforeEach(() => {
+  // getOrCreateFixedAppSalt caches its resolved value in a module-level
+  // variable (safe in production since FixedAppSalt never changes for the
+  // vault's lifetime -- see the function's own header comment), but that
+  // means fakeBrowser.reset() alone isn't enough to isolate tests from each
+  // other: the cache would otherwise survive across `it()` blocks in this
+  // file even though storage was wiped. vi.resetModules() + a fresh dynamic
+  // import per test restores full independence.
+  let getOrCreateFixedAppSalt: typeof import('../../../../background/vault/salt').getOrCreateFixedAppSalt;
+
+  beforeEach(async () => {
     fakeBrowser.reset();
+    vi.resetModules();
+    ({ getOrCreateFixedAppSalt } = await import('../../../../background/vault/salt'));
   });
 
   it('generates and persists a salt on first call', async () => {
@@ -32,5 +42,15 @@ describe('getOrCreateFixedAppSalt', () => {
 
     expect(second).toEqual(first);
     expect(setSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('reads storage only once across repeated calls within the same module lifetime', async () => {
+    const getSpy = vi.spyOn(fakeBrowser.storage.local, 'get');
+
+    await getOrCreateFixedAppSalt();
+    await getOrCreateFixedAppSalt();
+    await getOrCreateFixedAppSalt();
+
+    expect(getSpy).toHaveBeenCalledTimes(1);
   });
 });

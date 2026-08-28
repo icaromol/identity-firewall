@@ -11,6 +11,7 @@
 // POLICY_DECISION, etc. still belong to Phase 3/4 and aren't here yet.
 
 import { z } from 'zod';
+import type { ServiceIdentityRecord } from './vault-schema';
 import { Argon2ParamsSchema, CredentialRecordSchema, PersonalDataSchema } from './vault-schema';
 
 export const DetectedFieldSchema = z.object({
@@ -224,3 +225,12 @@ export interface VaultStatusResponse {
   configuredUnlockMethod: 'passkey' | 'passphrase' | undefined;
   passkeyCredentialId: string | undefined;
 }
+
+// GET_SERVICE_IDENTITY/CREATE_SERVICE_IDENTITY's response payload shapes
+// (background/identity/handler.ts) reuse ServiceIdentityRecord directly
+// rather than inventing a trimmed response type the way OriginSummary/
+// VaultStatusResponse were invented -- M7's own acceptance criterion needs
+// GET_SERVICE_IDENTITY to return "the exact same keypair" before and after
+// a backup restore, which requires the full record (M5).
+export type GetServiceIdentityResponse = ServiceIdentityRecord | null;
+export type CreateServiceIdentityResponse = ServiceIdentityRecord;

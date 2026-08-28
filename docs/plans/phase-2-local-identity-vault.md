@@ -210,6 +210,93 @@ Ordered by dependency, not by calendar week.
 - `background/router/registry.ts` — add rows for `GET_SERVICE_IDENTITY`, `CREATE_SERVICE_IDENTITY` under the already-reserved `'identity'` capability.
 - **Acceptance for M5**: deriving twice from the same `RootSecret` + origin produces byte-identical keypairs (determinism — the core property ADR-010 exists for); two different origins produce visibly different keys; `GET_SERVICE_IDENTITY` returns `null` before creation and the same values after, across a simulated storage read.
 
+#### M5 — Implementation (as built)
+
+- **Decision 4 resolved cleanly in Web Crypto's favor — no `@noble/curves` fallback needed.**
+  Verified empirically (real Node `webcrypto`, independently reproduced by a second
+  verification pass): `crypto.subtle.importKey('pkcs8', ...)` accepts a bare 32-byte Ed25519
+  seed when wrapped in the fixed, standard RFC 8410 §10.3 DER envelope (a 16-byte prefix +
+  the 32-byte seed, 48 bytes total) — data encoding, not hand-rolled cryptography. Both
+  `'raw'` and `'jwk'`-without-`x` import paths fail. Both halves of the derived keypair are
+  deterministic (confirmed via repeated public-key export AND via signature comparison —
+  Ed25519 signing is itself deterministic). Full record: **ADR-014** (new, Accepted).
+- **`deriveServiceIdentityKeypair` deviates from the macro plan's literal signature in two
+  ways**: `rootSecret: Uint8Array`, not `ArrayBuffer` (matching what `deriveHkdfBits`/
+  `base64ToBytes` already produce throughout M2-M4); and it returns a new
+  `ServiceIdentityKeypair { privateKey, publicKey, identifierB64 }`, not a bare
+  `CryptoKeyPair` — `identifierB64` is an unavoidable byproduct of the only reliable
+  public-key-export path (there is no "compute public key from private key" Web Crypto
+  primitive; the only path is a momentarily-extractable JWK export, immediately discarded in
+  favor of a fresh non-extractable key for actual use), so returning it avoids every caller
+  needing a redundant second export.
+- **`createServiceIdentity` captures its result from inside the `updateVaultData` mutator
+  closure, not via a read-back call after the write resolves.** A Plan agent traced a real,
+  if narrow, race in the read-back approach: the write-queue serializes *persisted* writes
+  correctly, but a follow-up read is not part of that queue, so another write could land in
+  the gap and return content the caller's own call never wrote. Not reachable within M5 alone
+  (no other writer to `serviceIdentities` exists yet), but closed now rather than rediscovered
+  once M6 adds one.
+- **`GetServiceIdentityResponse`/`CreateServiceIdentityResponse` reuse `ServiceIdentityRecord`
+  directly**, rather than inventing a trimmed response shape the way `VaultStatusResponse`/
+  `OriginSummary` were for M3/M4 — confirmed necessary, not just simpler: M7's own acceptance
+  criterion requires `GET_SERVICE_IDENTITY` to return "the exact same keypair" before and
+  after a backup restore, which needs the full record.
+- **The stale-test risk from M3→M4 recurred and was fixed the same way**:
+  `tests/unit/background/router/dispatch.test.ts`'s "no registered handler" example moved
+  from `GET_SERVICE_IDENTITY` (now registered) to `GET_PERSONAL_DATA` (M6 territory).
+- **Doc-fix scope for "Ed25519, not ECDSA" was wider than just `security-model.md`**:
+  `identity-model.md`'s own decision blockquote and `browser-architecture.md`'s tech-stack
+  table were also corrected. `ADR-003` and `ADR-010` themselves were deliberately left
+  unedited (general Web-Crypto-capability description and historical record, respectively) —
+  ADR-014 cross-references and narrows ADR-010's phrasing instead.
+- **A structural property stated explicitly in ADR-014, not left implicit**: the private key
+  is never persisted anywhere, only `identifierB64`. Any future signing use (Phase 3's
+  Identity Firewall, most plausibly) must re-derive the private key on demand every time,
+  never fetch a cached `CryptoKey` — consistent with ADR-010's "recoverable from root alone"
+  property, but a real per-operation cost worth budgeting for up front.
+- **A minor plan refinement found during implementation**: the "PKCS8 wrapper regression
+  guard" test (48 bytes, prefix bytes correct, seed preserved unchanged) is written as a
+  direct unit test of the exported `wrapEd25519SeedAsPkcs8` helper, not as an indirect
+  bit-flip-through-HKDF test — there's no practical way to control the HKDF-derived seed's
+  exact bits from the outside, so testing the DER envelope construction directly is both
+  simpler and a more precise regression guard on the actual risk (an off-by-one/wrong-prefix
+  edit), while "different inputs produce different keys" is already covered end to end by
+  the origin/rootSecret determinism tests.
+- **Two `/code-review` findings, both fixed**: `createServiceIdentity`'s idempotent path
+  still called `updateVaultData`, which always re-encrypts and persists the whole vault blob
+  after its mutator runs even when the mutator changes nothing — so every repeated "ensure
+  identity exists" call for an already-created origin paid a full Ed25519 derivation plus a
+  full blob re-encrypt for no reason. Fixed with a fast-path `getServiceIdentity` check that
+  returns immediately when the record already exists, skipping derivation and the write-queue
+  entirely; the in-mutator existence check on the slow path still covers the residual race
+  between that fast-path check and a concurrent creation landing first. Separately,
+  `getOrCreateFixedAppSalt` (M2) read `browser.storage.local` on every single call — cheap in
+  isolation, but M5 is the first caller to invoke it repeatedly in a tight sequence (once per
+  Service Identity derivation). Fixed by caching the resolved salt in a module-level variable
+  in `background/vault/salt.ts` — safe specifically because `FixedAppSalt` never changes for
+  the vault's lifetime (unlike vault data, which does), naturally cleared on every MV3
+  service-worker restart. This required `tests/unit/background/vault/salt.test.ts` to switch
+  to `vi.resetModules()` + a fresh dynamic import per test, since `fakeBrowser.reset()` alone
+  no longer isolates tests from each other once the module holds its own in-memory cache — a
+  real, if narrow, test-isolation gap the cache introduced, caught by a concrete test failure
+  (the "only writes once" concurrency test) rather than left latent.
+- **Test coverage**: `tests/unit/background/identity/derive.test.ts` (new) covers both-halves
+  determinism (identical `identifierB64` and identical signatures across independent
+  re-derivations), origin/rootSecret sensitivity, a working sign/verify round trip, the
+  returned private key's non-extractability, `identifierB64`'s internal consistency with a
+  direct raw export of the returned public key, and the PKCS8 wrapper's exact byte layout.
+  `tests/unit/background/identity/storage.test.ts` (new) covers the full
+  null-before/record-after lifecycle, idempotent creation, two origins deriving distinct
+  identities, and both `getServiceIdentity`/`createServiceIdentity` rejecting with
+  `VaultLockedError` when locked. `tests/unit/background/identity/handler.test.ts` (new)
+  mirrors the storage-layer lifecycle at the handler layer and confirms origin normalization
+  happens at the handler boundary. `tests/unit/background/router/dispatch.test.ts` amended
+  per the stale-test fix above; `tests/unit/background/vault/salt.test.ts` amended per the
+  caching fix above, plus a new test confirming storage is read only once across repeated
+  calls. Total suite: 188 tests (up from M4's 167), full `pnpm check` and `pnpm build` green.
+  No manual browser test this milestone — M5 has no UI/`stores/` surface (pure `background/`
+  work), matching the macro plan's own scope for this milestone.
+
 ### M6 — Credentials + Personal Data storage
 
 - `background/vault/credentials/storage.ts`, `handler.ts` — `handleGetCredential`, `handleSaveCredential`, `handleDeleteCredential`, keyed by `CanonicalOrigin`. `CredentialRecord` is either a password entry (real secret, protected only by whole-blob AES-GCM, no field-level encryption — matching Attestto's own validated "not field-level" choice, and consistent with Phase 5's biometric gate being an application-layer consent event, not a separate storage-layer key) or a passkey-reference entry (`rp.id` + `credentialId` only, per ADR-011 — never private key material).

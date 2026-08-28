@@ -115,7 +115,7 @@ A source-level teardown of Attestto (`docs/research/attestto-teardown.md`) surfa
 |---|---|---|
 | Extension framework | **WXT + Manifest V3** | Mature, cross-browser extension infrastructure — no reason to reinvent packaging/build tooling that already works. |
 | UI | **TypeScript + Vue 3 + Tailwind + Pinia** | Straightforward, well-supported stack for a small, focused extension UI. |
-| Cryptography | **Web Crypto API** (AES-GCM, ECDSA/EdDSA/P-256 signing, hashing, CSPRNG) | Never hand-roll cryptography — use the browser's audited, standard primitives for encryption, signing, hashing, and randomness. |
+| Cryptography | **Web Crypto API** (AES-GCM, Ed25519 signing, hashing, CSPRNG) | Never hand-roll cryptography — use the browser's audited, standard primitives for encryption, signing, hashing, and randomness. |
 | Storage | **chrome.storage.local** (small state) + **IndexedDB** (larger structures) | Matches the size and access pattern of what's actually being stored — small config/state vs. larger vault structures. |
 | Authentication | **WebAuthn / Credential Management API** | Passkeys are a mature, phishing-resistant standard — build on it rather than inventing a parallel authentication mechanism. |
 | Validation | **Zod** | Schema validation for the data flowing between content script, background service, and UI. |
