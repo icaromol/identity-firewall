@@ -211,3 +211,16 @@ export interface OriginSummary {
   formCount: number;
   lastDetectedAt: number;
 }
+
+// VAULT_STATUS's response payload shape (background/vault/handler.ts's
+// handleVaultStatus), named once for the same reason as OriginSummary above.
+// configuredUnlockMethod/passkeyCredentialId are undefined until a vault has
+// been set up (or, for passkeyCredentialId, unless the configured method is
+// 'passkey') -- the popup treats an undefined configuredUnlockMethod as
+// "show both unlock forms" rather than an error (M4).
+export interface VaultStatusResponse {
+  initialized: boolean;
+  locked: boolean;
+  configuredUnlockMethod: 'passkey' | 'passphrase' | undefined;
+  passkeyCredentialId: string | undefined;
+}

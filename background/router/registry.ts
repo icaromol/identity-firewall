@@ -12,6 +12,12 @@ import type { Browser } from 'wxt/browser';
 import type { ExtensionMessage } from '../../shared/messages';
 import { handleFormDetected } from '../formDetection/handler';
 import { handleGetOriginState, handleGetSessionState } from '../session/handler';
+import {
+  handleCreateRootIdentity,
+  handleVaultLock,
+  handleVaultStatus,
+  handleVaultUnlock,
+} from '../vault/handler';
 
 export type Capability = 'formDetection' | 'session' | 'vault' | 'identity' | 'firewall';
 
@@ -46,5 +52,21 @@ export const registry: Registry = {
   GET_ORIGIN_STATE: {
     capability: 'session',
     handle: (message) => handleGetOriginState(message),
+  },
+  VAULT_STATUS: {
+    capability: 'vault',
+    handle: (message) => handleVaultStatus(message),
+  },
+  CREATE_ROOT_IDENTITY: {
+    capability: 'vault',
+    handle: (message) => handleCreateRootIdentity(message),
+  },
+  VAULT_UNLOCK: {
+    capability: 'vault',
+    handle: (message) => handleVaultUnlock(message),
+  },
+  VAULT_LOCK: {
+    capability: 'vault',
+    handle: (message) => handleVaultLock(message),
   },
 };

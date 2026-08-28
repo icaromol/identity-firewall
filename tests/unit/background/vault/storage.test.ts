@@ -10,12 +10,15 @@ import {
   clearCachedUnlockKey,
   decryptVaultDataWithKey,
   getCachedUnlockKey,
+  getConfiguredUnlockMethod,
+  getPasskeyCredentialId,
   getPassphraseArgon2Params,
   initializeVaultData,
   PassphraseArgon2ParamsCorruptedError,
   readVaultData,
   setCachedUnlockKey,
   setPassphraseArgon2Params,
+  setUnlockMethodMetadata,
   updateVaultData,
   VaultAlreadyInitializedError,
   VaultLockedError,
@@ -208,6 +211,41 @@ describe('vault storage', () => {
       await initializeVaultData(minimalVaultData(), key);
 
       await expect(decryptVaultDataWithKey(wrongKey)).rejects.toThrow();
+    });
+  });
+
+  describe('getConfiguredUnlockMethod / getPasskeyCredentialId', () => {
+    it('both return undefined when never configured', async () => {
+      expect(await getConfiguredUnlockMethod()).toBeUndefined();
+      expect(await getPasskeyCredentialId()).toBeUndefined();
+    });
+  });
+
+  describe('setUnlockMethodMetadata', () => {
+    it('writes "passphrase" and its Argon2 params together', async () => {
+      await setUnlockMethodMetadata({
+        method: 'passphrase',
+        argon2Params: { t: 2, m: 19456, p: 1 },
+      });
+
+      expect(await getConfiguredUnlockMethod()).toBe('passphrase');
+      expect(await getPassphraseArgon2Params()).toEqual({ t: 2, m: 19456, p: 1 });
+      expect(await getPasskeyCredentialId()).toBeUndefined();
+    });
+
+    it('writes "passkey" and its credential id together', async () => {
+      await setUnlockMethodMetadata({ method: 'passkey', credentialId: 'fixture-credential-id' });
+
+      expect(await getConfiguredUnlockMethod()).toBe('passkey');
+      expect(await getPasskeyCredentialId()).toBe('fixture-credential-id');
+      expect(await getPassphraseArgon2Params()).toBeUndefined();
+    });
+
+    it('a later call overwrites both fields of an earlier one', async () => {
+      await setUnlockMethodMetadata({ method: 'passkey', credentialId: 'first-credential-id' });
+      await setUnlockMethodMetadata({ method: 'passkey', credentialId: 'second-credential-id' });
+
+      expect(await getPasskeyCredentialId()).toBe('second-credential-id');
     });
   });
 });

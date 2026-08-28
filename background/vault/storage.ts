@@ -34,6 +34,8 @@ import { decryptBlob, encryptBlob, generateAesGcmKeyFromBits } from './crypto';
 const VAULT_BLOB_STORAGE_KEY = 'if_vault_blob_v1';
 const UNLOCK_KEY_STORAGE_KEY = 'if_vault_unlock_key_v1';
 const PASSPHRASE_KDF_STORAGE_KEY = 'if_vault_passphrase_kdf_v1';
+const UNLOCK_METHOD_STORAGE_KEY = 'if_vault_unlock_method_v1';
+const PASSKEY_CREDENTIAL_ID_STORAGE_KEY = 'if_vault_passkey_credential_id_v1';
 
 export class VaultLockedError extends Error {
   constructor() {
@@ -188,4 +190,69 @@ export async function getPassphraseArgon2Params(): Promise<Argon2Params | undefi
 
 export async function setPassphraseArgon2Params(params: Argon2Params): Promise<void> {
   await browser.storage.local.set({ [PASSPHRASE_KDF_STORAGE_KEY]: params });
+}
+
+// Which unlock method a vault was configured with (M4) -- unencrypted,
+// readable pre-unlock, same justification as FixedAppSalt/passphrase params.
+// Without this, the popup has no real way to know whether to show the
+// passkey or passphrase unlock form; inferring it from
+// getPassphraseArgon2Params() returning non-undefined is only a side-channel
+// guess that breaks the moment "ship both" (ADR-012) is ever read literally.
+//
+// getConfiguredUnlockMethod/getPasskeyCredentialId collapse "never
+// configured" and "stored but fails schema validation" into the same
+// undefined -- deliberately different from getPassphraseArgon2Params's
+// explicit PassphraseArgon2ParamsCorruptedError throw above. The risk
+// profiles differ: corrupted Argon2 params would silently derive the WRONG
+// key from a genuinely correct passphrase (a real correctness landmine).
+// Corrupted unlock-method/credential-id metadata just means the popup falls
+// back to its already-designed "show both unlock forms" degradation --
+// exactly the same UI it shows for "never configured" -- with no risk of
+// deriving a wrong key, since unlockVault's passphrase path never reads
+// this metadata at all, and its passkey path fails loudly (a clear "no
+// credential configured" error) if credentialId is genuinely missing.
+const UnlockMethodSchema = z.enum(['passkey', 'passphrase']);
+export type ConfiguredUnlockMethod = z.infer<typeof UnlockMethodSchema>;
+
+export async function getConfiguredUnlockMethod(): Promise<ConfiguredUnlockMethod | undefined> {
+  const stored = await browser.storage.local.get(UNLOCK_METHOD_STORAGE_KEY);
+  const parsed = UnlockMethodSchema.safeParse(stored[UNLOCK_METHOD_STORAGE_KEY]);
+  return parsed.success ? parsed.data : undefined;
+}
+
+// The passkey credential's base64url id (WebAuthn spec, RFC 4648 §5), so a
+// later unlock attempt can build allowCredentials without the popup needing
+// to guess or rely on unverified discoverable-credential resolution.
+export async function getPasskeyCredentialId(): Promise<string | undefined> {
+  const stored = await browser.storage.local.get(PASSKEY_CREDENTIAL_ID_STORAGE_KEY);
+  const raw = stored[PASSKEY_CREDENTIAL_ID_STORAGE_KEY];
+  return typeof raw === 'string' ? raw : undefined;
+}
+
+// Writes the configured method and its matching credential/params in ONE
+// browser.storage.local.set() call, not two sequential ones -- a
+// /code-review finding: writing them separately left a real, if narrow,
+// window where an interrupted setup (an MV3 service-worker restart is a
+// normal lifecycle event, not a rare crash) could persist
+// configuredUnlockMethod: 'passkey' with no matching passkeyCredentialId,
+// permanently stranding the vault (initializeVaultData already succeeded,
+// so a retry throws VaultAlreadyInitializedError with no repair path). A
+// single multi-key .set() call is applied together by the browser, so
+// method and its credential/params now always land or fail as one unit.
+export async function setUnlockMethodMetadata(
+  metadata:
+    | { method: 'passphrase'; argon2Params: Argon2Params }
+    | { method: 'passkey'; credentialId: string },
+): Promise<void> {
+  if (metadata.method === 'passphrase') {
+    await browser.storage.local.set({
+      [UNLOCK_METHOD_STORAGE_KEY]: metadata.method,
+      [PASSPHRASE_KDF_STORAGE_KEY]: metadata.argon2Params,
+    });
+  } else {
+    await browser.storage.local.set({
+      [UNLOCK_METHOD_STORAGE_KEY]: metadata.method,
+      [PASSKEY_CREDENTIAL_ID_STORAGE_KEY]: metadata.credentialId,
+    });
+  }
 }

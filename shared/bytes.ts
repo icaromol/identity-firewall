@@ -34,3 +34,18 @@ export function base64ToBytes(b64: string): Uint8Array {
   }
   return bytes;
 }
+
+// base64url decode (RFC 4648 §5) -- distinct from the standard base64
+// above. WebAuthn's PublicKeyCredential.id is spec'd to be base64url, never
+// standard base64, so reconstructing allowCredentials[0].id (a BufferSource)
+// from a persisted credentialId string needs this, not base64ToBytes (M4).
+// No corresponding bytesToBase64Url encoder: every base64url value in this
+// codebase's design is one the browser hands us already-encoded
+// (credential.id) -- nothing here ever needs to PRODUCE base64url output,
+// only consume it, so that direction was removed as unused (/code-review).
+
+export function base64UrlToBytes(b64url: string): Uint8Array {
+  const padded = b64url.replace(/-/g, '+').replace(/_/g, '/');
+  const paddingNeeded = (4 - (padded.length % 4)) % 4;
+  return base64ToBytes(padded + '='.repeat(paddingNeeded));
+}

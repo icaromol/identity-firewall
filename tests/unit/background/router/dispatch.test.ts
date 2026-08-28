@@ -38,9 +38,11 @@ describe('handleRuntimeMessage', () => {
   });
 
   it('replies NOT_IMPLEMENTED synchronously for a schema-valid type with no registered handler', () => {
+    // GET_SERVICE_IDENTITY is still unregistered (M5) -- VAULT_STATUS itself
+    // used to be this test's example, but M4 gave it a real handler.
     const responses: MessageResponse[] = [];
     const keepChannelOpen = handleRuntimeMessage(
-      { type: 'VAULT_STATUS' },
+      { type: 'GET_SERVICE_IDENTITY', payload: { origin: 'https://example.com' } },
       {} as never,
       (response) => responses.push(response),
     );

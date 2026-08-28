@@ -1,16 +1,33 @@
 <script lang="ts" setup>
 // M5 -- the real "sites detected this session" view, backed by
-// stores/session.store.ts, plus a static Vault placeholder that makes no
-// network or storage calls of any kind (Vault itself is Phase 2 -- see
-// docs/plans/phase-1-extension-foundation.md).
-import { onMounted } from 'vue';
+// stores/session.store.ts. M4 adds the Vault section's three real states
+// (setup/locked/unlocked), backed by stores/vault.store.ts.
+import { onMounted, ref } from 'vue';
 import { useSessionStore } from '../../stores/session.store';
+import { useVaultStore } from '../../stores/vault.store';
 
 const session = useSessionStore();
+const vault = useVaultStore();
+
+const setupPassphrase = ref('');
+const unlockPassphrase = ref('');
 
 onMounted(() => {
   session.fetchSessionState();
+  vault.fetchStatus();
 });
+
+// biome-ignore lint/correctness/noUnusedVariables: called from @submit.prevent in <template> -- Biome only lints the <script> block, it can't see template usage.
+function submitSetupPassphrase() {
+  vault.setupWithPassphrase(setupPassphrase.value);
+  setupPassphrase.value = '';
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: called from @submit.prevent in <template> -- Biome only lints the <script> block, it can't see template usage.
+function submitUnlockPassphrase() {
+  vault.unlockWithPassphrase(unlockPassphrase.value);
+  unlockPassphrase.value = '';
+}
 </script>
 
 <template>
@@ -53,7 +70,114 @@ onMounted(() => {
 
     <section class="mt-4 border-t border-neutral-800 pt-4">
       <h2 class="text-xs font-semibold uppercase tracking-wide text-neutral-400">Vault</h2>
-      <p class="mt-2 italic text-neutral-500">Not yet implemented — arrives in Phase 2.</p>
+
+      <p v-if="vault.status === 'error'" class="mt-2 text-red-400">{{ vault.error }}</p>
+
+      <!-- 'idle' (fetchStatus hasn't resolved yet) gets its own branch --
+           otherwise vault.store.ts's default state (initialized:false)
+           would flash "set up your vault" on every popup open, even for an
+           already-set-up vault, until the async VAULT_STATUS reply lands. -->
+      <p v-if="vault.status === 'idle'" class="mt-2 text-neutral-400">Loading…</p>
+
+      <!-- No vault yet: setup. Checked before `locked` -- a brand-new,
+           uninitialized vault also reports locked:true, so checking `locked`
+           first would show "please unlock" instead of "please set up". -->
+      <div v-else-if="!vault.initialized" class="mt-2 space-y-3">
+        <p class="text-neutral-400">Set up your vault to get started.</p>
+
+        <button
+          type="button"
+          class="w-full rounded bg-neutral-100 px-3 py-1.5 font-medium text-neutral-900 disabled:opacity-50"
+          :disabled="vault.status === 'loading'"
+          @click="vault.setupWithPasskey()"
+        >
+          Set up with Passkey (recommended)
+        </button>
+        <p class="text-xs text-neutral-500">
+          Uses your device's biometric or security key. Recommended over a passphrase -- see
+          ADR-012.
+        </p>
+
+        <form class="space-y-2" @submit.prevent="submitSetupPassphrase">
+          <input
+            v-model="setupPassphrase"
+            type="password"
+            placeholder="Or choose a passphrase instead"
+            class="w-full rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-neutral-100"
+          />
+          <button
+            type="submit"
+            class="w-full rounded border border-neutral-700 px-3 py-1.5 text-neutral-300 disabled:opacity-50"
+            :disabled="vault.status === 'loading' || setupPassphrase.length === 0"
+          >
+            Set up with Passphrase
+          </button>
+        </form>
+      </div>
+
+      <!-- Initialized but locked: unlock form, keyed off which method this
+           vault was actually configured with. undefined -> show both,
+           graceful degradation rather than an error. The passkey button
+           additionally requires passkeyCredentialId to actually be present
+           (not just configuredUnlockMethod === 'passkey') -- defense in
+           depth against the case where that pairing was ever only
+           partially persisted; the passphrase form is shown whenever the
+           passkey button ISN'T fully usable, so the user is never left
+           with zero visible way to unlock. -->
+      <div v-else-if="vault.locked" class="mt-2 space-y-3">
+        <p class="text-neutral-400">Vault is locked.</p>
+
+        <button
+          v-if="
+            vault.configuredUnlockMethod === undefined ||
+            (vault.configuredUnlockMethod === 'passkey' && vault.passkeyCredentialId)
+          "
+          type="button"
+          class="w-full rounded bg-neutral-100 px-3 py-1.5 font-medium text-neutral-900 disabled:opacity-50"
+          :disabled="vault.status === 'loading'"
+          @click="vault.unlockWithPasskey()"
+        >
+          Unlock with Passkey
+        </button>
+
+        <form
+          v-if="
+            vault.configuredUnlockMethod === undefined ||
+            vault.configuredUnlockMethod === 'passphrase' ||
+            (vault.configuredUnlockMethod === 'passkey' && !vault.passkeyCredentialId)
+          "
+          class="space-y-2"
+          @submit.prevent="submitUnlockPassphrase"
+        >
+          <input
+            v-model="unlockPassphrase"
+            type="password"
+            placeholder="Passphrase"
+            class="w-full rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-neutral-100"
+          />
+          <button
+            type="submit"
+            class="w-full rounded border border-neutral-700 px-3 py-1.5 text-neutral-300 disabled:opacity-50"
+            :disabled="vault.status === 'loading' || unlockPassphrase.length === 0"
+          >
+            Unlock with Passphrase
+          </button>
+        </form>
+      </div>
+
+      <!-- Unlocked. Per decision 6, nothing about vault CONTENTS is shown
+           here -- just the fact that it's unlocked. -->
+      <div v-else class="mt-2 space-y-3">
+        <p class="text-green-400">Vault unlocked.</p>
+        <button
+          type="button"
+          class="rounded border border-neutral-700 px-3 py-1.5 text-neutral-300 disabled:opacity-50"
+          :disabled="vault.status === 'loading'"
+          @click="vault.lock()"
+        >
+          Lock
+        </button>
+      </div>
     </section>
   </main>
 </template>
