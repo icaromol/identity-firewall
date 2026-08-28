@@ -114,6 +114,12 @@ export const CredentialRecordSchema = z.discriminatedUnion('kind', [
 ]);
 export type CredentialRecord = z.infer<typeof CredentialRecordSchema>;
 
+// Bare credential kind, without the rest of a full CredentialRecord --
+// needed by ServiceIdentityMetaSchema below (ADR-015's index tier) to
+// record WHICH kinds exist for an origin without ever storing their values.
+export const CredentialKindSchema = z.enum(['password', 'passkey']);
+export type CredentialKind = z.infer<typeof CredentialKindSchema>;
+
 // --- Aliases ---
 export const AliasProviderNameSchema = z.enum(['none', 'simplelogin', 'addy']);
 export type AliasProviderName = z.infer<typeof AliasProviderNameSchema>;
@@ -156,6 +162,13 @@ export const ServiceIdentityHistoryEntrySchema = z.object({
 });
 export type ServiceIdentityHistoryEntry = z.infer<typeof ServiceIdentityHistoryEntrySchema>;
 
+// @deprecated Superseded by ServiceIdentityMetaSchema (ADR-015's index
+// tier, below) + SitePayloadSchema (ADR-015's per-site payload tier, near
+// VaultIndexSchema below) -- this single-record shape nests real
+// credential/alias VALUES inline, exactly what the vault storage tiering
+// refactor (docs/plans/phase-2-vault-tiering-refactor.md) moves out of the
+// always-decrypted index. Kept until that plan's Step 6 migrates its last
+// consumer, then deleted.
 export const ServiceIdentityRecordSchema = z.object({
   origin: z.string(), // CanonicalOrigin (shared/origin.ts) as a plain string -- the branded type is TS-only, not preserved through JSON storage
   identifierB64: z.string(), // the derived Ed25519 public key for this origin (ADR-010, built in M5)
@@ -172,6 +185,35 @@ export const ServiceIdentityRecordSchema = z.object({
   history: z.array(ServiceIdentityHistoryEntrySchema),
 });
 export type ServiceIdentityRecord = z.infer<typeof ServiceIdentityRecordSchema>;
+
+// --- ServiceIdentityMeta (Tier 1 index entry, ADR-015) ---
+// Metadata-only per-origin view: enough to answer "which sites do I have
+// an account for" and "what kind of credential does this site have" without
+// ever decrypting that site's actual secret values (Tier 3, SitePayloadSchema
+// near VaultIndexSchema below).
+export const ServiceIdentityMetaSchema = z.object({
+  origin: z.string(), // CanonicalOrigin as a plain string, same convention as ServiceIdentityRecordSchema.origin above
+  identifierB64: z.string(), // the derived Ed25519 public key for this origin (ADR-010)
+  createdAt: z.number(),
+  // Which credential KINDS exist, not their values -- the whole point of
+  // the index tier is answering "does this site have a password/passkey"
+  // without ever decrypting that site's actual secret values.
+  credentialKinds: z
+    .array(CredentialKindSchema)
+    .refine((kinds) => new Set(kinds).size === kinds.length, {
+      message: 'at most one credential per kind is allowed per service identity',
+    }),
+  aliasCount: z.number().int().nonnegative(),
+  history: z.array(ServiceIdentityHistoryEntrySchema),
+  // Random (a UUID), never derived from `origin` -- a deterministic name,
+  // even hashed, would let an attacker with mere read access to
+  // browser.storage.local (no decryption needed) enumerate candidate
+  // origins against the naming scheme and recover the site list from key
+  // NAMES alone, defeating the index's entire purpose (ADR-015's first
+  // supporting rule).
+  payloadStorageKey: z.string(),
+});
+export type ServiceIdentityMeta = z.infer<typeof ServiceIdentityMetaSchema>;
 
 // --- Policies / PrivacyLedger ---
 // Schema-only in Phase 2 -- Phase 4 owns the engine that reads/writes
@@ -192,7 +234,15 @@ export const PrivacyLedgerEntrySchema = z.object({
 });
 export type PrivacyLedgerEntry = z.infer<typeof PrivacyLedgerEntrySchema>;
 
-// --- The whole vault ---
+// --- The whole vault (deprecated, ADR-015) ---
+// @deprecated Superseded by the three-tier split below: VaultIndexSchema
+// (RootIdentity + per-origin metadata only), PersonalDataSchema in its own
+// top-level storage key (unchanged shape, new home), and SitePayloadSchema
+// per origin (real credential/alias values). See
+// docs/adr/ADR-015-three-tier-vault-storage.md. Kept until
+// docs/plans/phase-2-vault-tiering-refactor.md's Step 6 migrates its last
+// consumer (background/vault/storage.ts's whole-blob read/write functions),
+// then deleted.
 export const VaultDataSchema = z.object({
   schemaVersion: z.literal(1),
   rootIdentity: RootIdentitySchema,
@@ -203,3 +253,36 @@ export const VaultDataSchema = z.object({
   privacyLedger: z.array(PrivacyLedgerEntrySchema),
 });
 export type VaultData = z.infer<typeof VaultDataSchema>;
+
+// --- Vault Index (Tier 1, ADR-015) ---
+// Decrypted on every unlock -- RootIdentity plus per-origin METADATA ONLY
+// (ServiceIdentityMetaSchema above), no credential/alias VALUES and no
+// PersonalData (that's its own tier, Tier 2, stored under a completely
+// separate key -- see the "Storage-key naming" table in
+// docs/plans/phase-2-vault-tiering-refactor.md).
+export const VaultIndexSchema = z.object({
+  schemaVersion: z.literal(1),
+  rootIdentity: RootIdentitySchema,
+  serviceIdentities: z.record(z.string(), ServiceIdentityMetaSchema), // keyed by CanonicalOrigin
+  aliasProviderConfig: AliasProviderConfigSchema,
+  policies: z.array(PolicyRuleSchema),
+  privacyLedger: z.array(PrivacyLedgerEntrySchema),
+});
+export type VaultIndex = z.infer<typeof VaultIndexSchema>;
+
+// --- Site Payload (Tier 3, ADR-015) ---
+// One per origin, stored under browser.storage.local key
+// `if_vault_site_<payloadStorageKey>_v1` (never keyed by origin itself --
+// see ServiceIdentityMetaSchema.payloadStorageKey's own comment above),
+// encrypted with a key derived on demand (background/vault/siteKey.ts).
+// Holds the real credential/alias VALUES the index above only summarizes.
+export const SitePayloadSchema = z.object({
+  origin: z.string(), // redundant with the index entry -- lets a standalone decrypt sanity-check it landed on the RIGHT site's blob, not a misrouted one
+  credentials: z
+    .array(CredentialRecordSchema)
+    .refine((credentials) => new Set(credentials.map((c) => c.kind)).size === credentials.length, {
+      message: 'at most one credential per kind is allowed per service identity',
+    }),
+  aliases: z.array(AliasRecordSchema),
+});
+export type SitePayload = z.infer<typeof SitePayloadSchema>;

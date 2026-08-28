@@ -232,6 +232,18 @@ export interface VaultStatusResponse {
 // VaultStatusResponse were invented -- M7's own acceptance criterion needs
 // GET_SERVICE_IDENTITY to return "the exact same keypair" before and after
 // a backup restore, which requires the full record (M5).
+//
+// @deprecated Per ADR-015 (vault storage tiering), these two message types
+// will read/write ONLY the index tier once
+// docs/plans/phase-2-vault-tiering-refactor.md's Step 5 migrates
+// background/identity/{storage,handler}.ts off ServiceIdentityRecord, at
+// which point these should be repointed to ServiceIdentityMeta (which no
+// longer carries real credential/alias VALUES, only metadata -- so the
+// backup-restore acceptance criterion above will need re-verifying against
+// identifierB64 specifically, not "the exact same record"). Left unchanged
+// here in Step 1: nothing consumes ServiceIdentityMeta yet, and repointing
+// now would break identity/storage.ts's still-ServiceIdentityRecord-shaped
+// return values before Step 5 is ready for it.
 export type GetServiceIdentityResponse = ServiceIdentityRecord | null;
 export type CreateServiceIdentityResponse = ServiceIdentityRecord;
 
