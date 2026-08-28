@@ -1,13 +1,13 @@
-// Reads/writes the top-level PersonalData tree via vault/storage.ts's
-// readVaultData/updateVaultData -- same one-write-path convention as
-// background/identity/storage.ts and background/vault/credentials/storage.ts.
+// Reads/writes the top-level PersonalData tier (ADR-015's Tier 2, its own
+// storage key, if_vault_personal_data_v1) via vault/storage.ts's
+// readPersonalDataBlob/updatePersonalDataBlobWithResult -- one write path,
+// same convention as every other capability module.
 
 import type { PersonalData } from '../../../shared/vault-schema';
-import { readVaultData, updateVaultDataWithResult } from '../storage';
+import { readPersonalDataBlob, updatePersonalDataBlobWithResult } from '../storage';
 
 export async function getPersonalData(): Promise<PersonalData> {
-  const data = await readVaultData();
-  return data.personalData;
+  return readPersonalDataBlob();
 }
 
 // Patch-style: every field already .optional(), so a key simply absent from
@@ -19,9 +19,9 @@ export async function getPersonalData(): Promise<PersonalData> {
 // `undefined` rather than omitted entirely) is stripped before merging,
 // treated the same as a fully-absent key -- a /code-review finding: Zod
 // preserves undefined-valued keys as real own-enumerable properties through
-// PersonalDataSchema.parse, so `{ ...draft.personalData, ...patch }` alone
-// would silently overwrite a previously-saved field with undefined whenever
-// a caller's patch object happened to carry one, rather than leaving it
+// PersonalDataSchema.parse, so `{ ...draft, ...patch }` alone would
+// silently overwrite a previously-saved field with undefined whenever a
+// caller's patch object happened to carry one, rather than leaving it
 // untouched as the "patch, not overwrite" contract requires.
 //
 // Clearing a field to empty means sending '' -- PersonalDataSchema fields are
@@ -32,8 +32,8 @@ export async function setPersonalData(patch: PersonalData): Promise<PersonalData
     Object.entries(patch).filter(([, value]) => value !== undefined),
   ) as PersonalData;
 
-  return updateVaultDataWithResult((draft) => {
-    const merged = { ...draft.personalData, ...cleanPatch };
-    return { next: { ...draft, personalData: merged }, result: merged };
+  return updatePersonalDataBlobWithResult((draft) => {
+    const merged = { ...draft, ...cleanPatch };
+    return { next: merged, result: merged };
   });
 }

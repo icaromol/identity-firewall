@@ -61,7 +61,7 @@ describe('createRootIdentity', () => {
 
     await expect(createRootIdentity(passkeyInput)).rejects.toThrow(VaultAlreadyInitializedError);
 
-    // The ordering invariant: initializeVaultData's guard fires before any
+    // The ordering invariant: initializeVaultIndex's guard fires before any
     // unlock-metadata write, so a rejected second call must never have
     // touched the first vault's already-persisted metadata or cached key.
     expect(await getConfiguredUnlockMethod()).toBe(methodBefore);
