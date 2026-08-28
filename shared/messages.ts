@@ -11,7 +11,7 @@
 // POLICY_DECISION, etc. still belong to Phase 3/4 and aren't here yet.
 
 import { z } from 'zod';
-import type { CredentialRecord, PersonalData, ServiceIdentityRecord } from './vault-schema';
+import type { CredentialRecord, PersonalData, ServiceIdentityMeta } from './vault-schema';
 import { Argon2ParamsSchema, CredentialRecordSchema, PersonalDataSchema } from './vault-schema';
 
 export const DetectedFieldSchema = z.object({
@@ -227,25 +227,18 @@ export interface VaultStatusResponse {
 }
 
 // GET_SERVICE_IDENTITY/CREATE_SERVICE_IDENTITY's response payload shapes
-// (background/identity/handler.ts) reuse ServiceIdentityRecord directly
+// (background/identity/handler.ts) reuse ServiceIdentityMeta directly
 // rather than inventing a trimmed response type the way OriginSummary/
-// VaultStatusResponse were invented -- M7's own acceptance criterion needs
-// GET_SERVICE_IDENTITY to return "the exact same keypair" before and after
-// a backup restore, which requires the full record (M5).
-//
-// @deprecated Per ADR-015 (vault storage tiering), these two message types
-// will read/write ONLY the index tier once
-// docs/plans/phase-2-vault-tiering-refactor.md's Step 5 migrates
-// background/identity/{storage,handler}.ts off ServiceIdentityRecord, at
-// which point these should be repointed to ServiceIdentityMeta (which no
-// longer carries real credential/alias VALUES, only metadata -- so the
-// backup-restore acceptance criterion above will need re-verifying against
-// identifierB64 specifically, not "the exact same record"). Left unchanged
-// here in Step 1: nothing consumes ServiceIdentityMeta yet, and repointing
-// now would break identity/storage.ts's still-ServiceIdentityRecord-shaped
-// return values before Step 5 is ready for it.
-export type GetServiceIdentityResponse = ServiceIdentityRecord | null;
-export type CreateServiceIdentityResponse = ServiceIdentityRecord;
+// VaultStatusResponse were invented. Repointed from the old
+// ServiceIdentityRecord (which nested real credential/alias VALUES) to
+// ServiceIdentityMeta (index-tier metadata only) by the vault storage
+// tiering refactor's Step 5, per ADR-015 -- M7's original acceptance
+// criterion ("the exact same keypair" survives a backup restore) still
+// holds, just verified via identifierB64 specifically now rather than "the
+// exact same record," since a record's nested credentials/aliases no
+// longer exist on this type at all.
+export type GetServiceIdentityResponse = ServiceIdentityMeta | null;
+export type CreateServiceIdentityResponse = ServiceIdentityMeta;
 
 // GET_PERSONAL_DATA/SET_PERSONAL_DATA and GET_CREDENTIAL/SAVE_CREDENTIAL/
 // DELETE_CREDENTIAL's response payload shapes (background/vault/

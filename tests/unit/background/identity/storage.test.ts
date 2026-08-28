@@ -2,8 +2,14 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { fakeBrowser } from 'wxt/testing/fake-browser';
 import { createServiceIdentity, getServiceIdentity } from '../../../../background/identity/storage';
 import { createRootIdentity } from '../../../../background/vault/setup';
-import { VaultLockedError } from '../../../../background/vault/storage';
+import { deriveSitePayloadKey } from '../../../../background/vault/siteKey';
+import {
+  readSitePayload,
+  readVaultIndex,
+  VaultLockedError,
+} from '../../../../background/vault/storage';
 import { lockVault } from '../../../../background/vault/unlock';
+import { base64ToBytes } from '../../../../shared/bytes';
 import type { UnlockInput } from '../../../../shared/messages';
 import { normalizeOrigin } from '../../../../shared/origin';
 
@@ -25,14 +31,29 @@ describe('identity storage', () => {
     expect(await getServiceIdentity(originA)).toBeNull();
   });
 
-  it('createServiceIdentity creates a record with empty credentials/aliases/history', async () => {
-    const record = await createServiceIdentity(originA);
+  it('createServiceIdentity creates a meta entry with empty credentialKinds/history and a random payloadStorageKey', async () => {
+    const meta = await createServiceIdentity(originA);
 
-    expect(record.origin).toBe(originA);
-    expect(record.identifierB64).toEqual(expect.any(String));
-    expect(record.credentials).toEqual([]);
-    expect(record.aliases).toEqual([]);
-    expect(record.history).toEqual([]);
+    expect(meta.origin).toBe(originA);
+    expect(meta.identifierB64).toEqual(expect.any(String));
+    expect(meta.credentialKinds).toEqual([]);
+    expect(meta.aliasCount).toBe(0);
+    expect(meta.history).toEqual([]);
+    expect(meta.payloadStorageKey).toEqual(expect.any(String));
+  });
+
+  it('createServiceIdentity also initializes an empty Tier 3 site payload for the new origin', async () => {
+    const meta = await createServiceIdentity(originA);
+
+    const index = await readVaultIndex();
+    const rootSecret = base64ToBytes(index.rootIdentity.rootSecretB64);
+    const siteKey = await deriveSitePayloadKey(rootSecret, originA);
+
+    expect(await readSitePayload(meta.payloadStorageKey, siteKey)).toEqual({
+      origin: originA,
+      credentials: [],
+      aliases: [],
+    });
   });
 
   it('getServiceIdentity returns the same values after creation', async () => {

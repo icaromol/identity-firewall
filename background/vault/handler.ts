@@ -15,15 +15,21 @@ import {
   getCachedUnlockKey,
   getConfiguredUnlockMethod,
   getPasskeyCredentialId,
-  vaultBlobExists,
+  vaultIndexExists,
 } from './storage';
 import { lockVault, unlockVault } from './unlock';
 
+// vaultIndexExists(), not the old vaultBlobExists() -- a gap the tiering
+// refactor's own Step 4 missed (this handler wasn't in that step's file
+// list) and only surfaced as a real runtime test failure: createRootIdentity
+// (Step 4) now writes the INDEX tier, so the old whole-blob key is never
+// written anymore, and this would have permanently reported
+// initialized: false for every vault ever created.
 export async function handleVaultStatus(
   _message: VaultStatusMessage,
 ): Promise<VaultStatusResponse> {
   const [initialized, cachedKey, configuredUnlockMethod, passkeyCredentialId] = await Promise.all([
-    vaultBlobExists(),
+    vaultIndexExists(),
     getCachedUnlockKey(),
     getConfiguredUnlockMethod(),
     getPasskeyCredentialId(),
