@@ -26,8 +26,14 @@ import { base64ToBytes, bytesToBase64 } from '../../shared/bytes';
 import {
   type Argon2Params,
   Argon2ParamsSchema,
+  type PersonalData,
+  PersonalDataSchema,
+  type SitePayload,
+  SitePayloadSchema,
   type VaultData,
   VaultDataSchema,
+  type VaultIndex,
+  VaultIndexSchema,
 } from '../../shared/vault-schema';
 import { decryptBlob, encryptBlob, generateAesGcmKeyFromBits } from './crypto';
 import { createSerialQueue } from './serialQueue';
@@ -275,4 +281,262 @@ export async function setUnlockMethodMetadata(
       [PASSKEY_CREDENTIAL_ID_STORAGE_KEY]: metadata.credentialId,
     });
   }
+}
+
+// ===========================================================================
+// Three-tier vault storage (ADR-015, docs/plans/phase-2-vault-tiering-refactor.md).
+//
+// Everything above this line is the ORIGINAL whole-blob API (M3) --
+// deliberately left in place and unused by the tiering refactor's Step 3,
+// per that plan's own instruction: later steps (4-6) migrate every caller
+// off it, and Step 6 deletes it once nothing references it anymore.
+//
+// Three independent encrypted surfaces, sharing the generic
+// readEncryptedBlob/persistEncryptedBlob helpers below instead of each
+// reimplementing "decrypt with schema validation" / "encrypt and persist":
+//
+//   Index (if_vault_index_v1)          -- RootIdentity + per-origin metadata
+//   Personal data (if_vault_personal_data_v1) -- unchanged PersonalData shape, own key
+//   Site payload (if_vault_site_<payloadStorageKey>_v1), one per origin -- real credential/alias values
+//
+// Each tier gets its own serializing queue (createSerialQueue(), the same
+// primitive the old writeQueue above now uses) so an unrelated site's write
+// never blocks on this site's write, or on an index/personal-data write --
+// one global queue for the whole vault (the old behavior above) would
+// serialize completely independent operations for no real reason.
+//
+// getCachedUnlockKey/setCachedUnlockKey/clearCachedUnlockKey above are
+// UNCHANGED and shared by all three tiers below -- the session-cached-bits
+// mechanism from M3 is orthogonal to how many encrypted blobs exist.
+
+const VAULT_INDEX_STORAGE_KEY = 'if_vault_index_v1';
+const PERSONAL_DATA_STORAGE_KEY = 'if_vault_personal_data_v1';
+const sitePayloadStorageKey = (payloadStorageKey: string): string =>
+  `if_vault_site_${payloadStorageKey}_v1`;
+
+async function blobExists(storageKey: string): Promise<boolean> {
+  const stored = await browser.storage.local.get(storageKey);
+  return stored[storageKey] !== undefined;
+}
+
+async function readEncryptedBlob<T>(
+  storageKey: string,
+  schema: z.ZodType<T>,
+  key: CryptoKey,
+): Promise<T> {
+  const stored = await browser.storage.local.get(storageKey);
+  const parsed = EncryptedVaultBlobSchema.safeParse(stored[storageKey]);
+  if (!parsed.success) {
+    throw new VaultNotInitializedError();
+  }
+  const iv = base64ToBytes(parsed.data.ivB64);
+  const ciphertext = base64ToBytes(parsed.data.ciphertextB64);
+  const plaintext = await decryptBlob(key, iv, ciphertext); // rejects with OperationError on a wrong key/corrupted data -- left unwrapped, same convention as the whole-blob API above
+  return schema.parse(JSON.parse(new TextDecoder().decode(plaintext)));
+}
+
+async function persistEncryptedBlob<T>(storageKey: string, data: T, key: CryptoKey): Promise<void> {
+  const plaintext = new TextEncoder().encode(JSON.stringify(data));
+  const { iv, ciphertext } = await encryptBlob(key, plaintext);
+  await browser.storage.local.set({
+    [storageKey]: { ivB64: bytesToBase64(iv), ciphertextB64: bytesToBase64(ciphertext) },
+  });
+}
+
+// Shared by all three tiers' *WithResult variants below -- the same
+// "capture a value out of a mutator, throw if it was somehow never
+// assigned" pattern updateVaultDataWithResult (above) was built to
+// deduplicate for ONE tier now needs deduplicating across THREE, so this
+// generalizes over any update-shaped function rather than tripling that
+// same block again.
+async function withResult<D, T>(
+  update: (mutator: (draft: D) => D) => Promise<void>,
+  mutator: (draft: D) => { next: D; result: T },
+): Promise<T> {
+  let captured: { result: T } | undefined;
+  await update((draft) => {
+    const { next, result } = mutator(draft);
+    captured = { result };
+    return next;
+  });
+  if (!captured) {
+    // Unreachable in practice -- the mutator above always assigns captured
+    // before its own return.
+    throw new Error('withResult: mutator did not assign a result');
+  }
+  return captured.result;
+}
+
+// --- Tier 1: Index ---
+
+const indexQueue = createSerialQueue();
+
+export async function vaultIndexExists(): Promise<boolean> {
+  return blobExists(VAULT_INDEX_STORAGE_KEY);
+}
+
+// Explicit key, no lock check -- mirrors initializeVaultData above exactly:
+// this runs during the FIRST-EVER write, before any key is cached.
+export function initializeVaultIndex(index: VaultIndex, key: CryptoKey): Promise<void> {
+  return indexQueue(async () => {
+    if (await blobExists(VAULT_INDEX_STORAGE_KEY)) {
+      throw new VaultAlreadyInitializedError();
+    }
+    const validated = VaultIndexSchema.parse(index);
+    await persistEncryptedBlob(VAULT_INDEX_STORAGE_KEY, validated, key);
+  });
+}
+
+export function updateVaultIndex(mutator: (draft: VaultIndex) => VaultIndex): Promise<void> {
+  return indexQueue(async () => {
+    const key = await getCachedUnlockKey();
+    if (!key) {
+      throw new VaultLockedError();
+    }
+    const current = await readEncryptedBlob(VAULT_INDEX_STORAGE_KEY, VaultIndexSchema, key);
+    const next = VaultIndexSchema.parse(mutator(current));
+    await persistEncryptedBlob(VAULT_INDEX_STORAGE_KEY, next, key);
+  });
+}
+
+export function updateVaultIndexWithResult<T>(
+  mutator: (draft: VaultIndex) => { next: VaultIndex; result: T },
+): Promise<T> {
+  return withResult(updateVaultIndex, mutator);
+}
+
+export async function readVaultIndex(): Promise<VaultIndex> {
+  const key = await getCachedUnlockKey();
+  if (!key) {
+    throw new VaultLockedError();
+  }
+  return readEncryptedBlob(VAULT_INDEX_STORAGE_KEY, VaultIndexSchema, key);
+}
+
+// --- Tier 2: Personal data ---
+
+const personalDataQueue = createSerialQueue();
+
+export function initializePersonalDataBlob(data: PersonalData, key: CryptoKey): Promise<void> {
+  return personalDataQueue(async () => {
+    if (await blobExists(PERSONAL_DATA_STORAGE_KEY)) {
+      throw new VaultAlreadyInitializedError();
+    }
+    const validated = PersonalDataSchema.parse(data);
+    await persistEncryptedBlob(PERSONAL_DATA_STORAGE_KEY, validated, key);
+  });
+}
+
+export function updatePersonalDataBlob(
+  mutator: (draft: PersonalData) => PersonalData,
+): Promise<void> {
+  return personalDataQueue(async () => {
+    const key = await getCachedUnlockKey();
+    if (!key) {
+      throw new VaultLockedError();
+    }
+    const current = await readEncryptedBlob(PERSONAL_DATA_STORAGE_KEY, PersonalDataSchema, key);
+    const next = PersonalDataSchema.parse(mutator(current));
+    await persistEncryptedBlob(PERSONAL_DATA_STORAGE_KEY, next, key);
+  });
+}
+
+export function updatePersonalDataBlobWithResult<T>(
+  mutator: (draft: PersonalData) => { next: PersonalData; result: T },
+): Promise<T> {
+  return withResult(updatePersonalDataBlob, mutator);
+}
+
+export async function readPersonalDataBlob(): Promise<PersonalData> {
+  const key = await getCachedUnlockKey();
+  if (!key) {
+    throw new VaultLockedError();
+  }
+  return readEncryptedBlob(PERSONAL_DATA_STORAGE_KEY, PersonalDataSchema, key);
+}
+
+// --- Tier 3: Site payload ---
+//
+// Unlike the index/personal-data tiers above, a site payload is NEVER
+// encrypted with the cached VaultUnlockKey directly -- it's encrypted with
+// a key derived on demand from RootSecret + origin
+// (background/vault/siteKey.ts's deriveSitePayloadKey, Step 2), which the
+// CALLER must derive and pass in explicitly (this module has no way to
+// obtain RootSecret itself without first reading the index, and doing that
+// here would couple this generic storage layer to identity-specific
+// lookup logic that belongs in background/identity/storage.ts and
+// background/vault/credentials/storage.ts, Step 5-6). Every function below
+// still independently checks getCachedUnlockKey() as a defense-in-depth
+// VaultLockedError guard -- structurally, a caller can only have obtained
+// a valid siteKey by having already unlocked the vault to read the index
+// first, but this makes that invariant explicit rather than assumed.
+//
+// One serializing queue PER payloadStorageKey, created on demand -- a
+// single shared queue here would serialize completely unrelated sites'
+// writes against each other for no reason (unlike the index/personal-data
+// tiers above, where there is only ever one instance to serialize).
+const sitePayloadQueues = new Map<string, ReturnType<typeof createSerialQueue>>();
+
+function getSitePayloadQueue(payloadStorageKey: string): ReturnType<typeof createSerialQueue> {
+  let queue = sitePayloadQueues.get(payloadStorageKey);
+  if (!queue) {
+    queue = createSerialQueue();
+    sitePayloadQueues.set(payloadStorageKey, queue);
+  }
+  return queue;
+}
+
+export function initializeSitePayload(
+  payloadStorageKey: string,
+  data: SitePayload,
+  siteKey: CryptoKey,
+): Promise<void> {
+  return getSitePayloadQueue(payloadStorageKey)(async () => {
+    const unlockKey = await getCachedUnlockKey();
+    if (!unlockKey) {
+      throw new VaultLockedError();
+    }
+    const storageKey = sitePayloadStorageKey(payloadStorageKey);
+    if (await blobExists(storageKey)) {
+      throw new VaultAlreadyInitializedError();
+    }
+    const validated = SitePayloadSchema.parse(data);
+    await persistEncryptedBlob(storageKey, validated, siteKey);
+  });
+}
+
+export function updateSitePayload(
+  payloadStorageKey: string,
+  siteKey: CryptoKey,
+  mutator: (draft: SitePayload) => SitePayload,
+): Promise<void> {
+  return getSitePayloadQueue(payloadStorageKey)(async () => {
+    const unlockKey = await getCachedUnlockKey();
+    if (!unlockKey) {
+      throw new VaultLockedError();
+    }
+    const storageKey = sitePayloadStorageKey(payloadStorageKey);
+    const current = await readEncryptedBlob(storageKey, SitePayloadSchema, siteKey);
+    const next = SitePayloadSchema.parse(mutator(current));
+    await persistEncryptedBlob(storageKey, next, siteKey);
+  });
+}
+
+export function updateSitePayloadWithResult<T>(
+  payloadStorageKey: string,
+  siteKey: CryptoKey,
+  mutator: (draft: SitePayload) => { next: SitePayload; result: T },
+): Promise<T> {
+  return withResult((m) => updateSitePayload(payloadStorageKey, siteKey, m), mutator);
+}
+
+export async function readSitePayload(
+  payloadStorageKey: string,
+  siteKey: CryptoKey,
+): Promise<SitePayload> {
+  const unlockKey = await getCachedUnlockKey();
+  if (!unlockKey) {
+    throw new VaultLockedError();
+  }
+  return readEncryptedBlob(sitePayloadStorageKey(payloadStorageKey), SitePayloadSchema, siteKey);
 }
