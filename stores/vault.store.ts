@@ -46,12 +46,19 @@ import { browser } from 'wxt/browser';
 import { base64UrlToBytes, bytesToBase64 } from '../shared/bytes';
 import type {
   CreateRootIdentityMessage,
+  ExportVaultBackupMessage,
+  ExportVaultBackupResponse,
   MessageResponse,
+  RestoreVaultBackupMessage,
+  RestoreVaultBackupResponse,
+  UnlockInput,
+  VaultBackupBundle,
   VaultLockMessage,
   VaultStatusMessage,
   VaultStatusResponse,
   VaultUnlockMessage,
 } from '../shared/messages';
+import { VaultBackupBundleSchema } from '../shared/messages';
 
 // Uint8Array<ArrayBuffer> annotations below (not bare Uint8Array) are a
 // TS-only concession, not a runtime one -- see background/vault/crypto.ts's
@@ -69,6 +76,96 @@ function bufferSourceToBytes(source: BufferSource): Uint8Array {
   return ArrayBuffer.isView(source)
     ? new Uint8Array(source.buffer, source.byteOffset, source.byteLength)
     : new Uint8Array(source);
+}
+
+// The passkey half of an UnlockInput, extracted from setupWithPasskey's own
+// body (M7) so restoreWithPasskey can run the identical WebAuthn ceremony
+// -- including its footgun-avoidance behavior above -- without duplicating
+// it. Returns the full UnlockInput (not just the credential) since it
+// already carries credentialId, which callers need for their own
+// post-success state update.
+async function createPasskeyUnlockInput(): Promise<
+  Extract<UnlockInput, { unlockMethod: 'passkey' }>
+> {
+  const credential = (await navigator.credentials.create({
+    publicKey: {
+      challenge: randomChallenge(),
+      rp: { name: 'Identity Firewall' },
+      user: { id: randomChallenge(), name: 'vault-unlock', displayName: 'Vault Unlock' },
+      pubKeyCredParams: [{ type: 'public-key', alg: -7 }],
+      authenticatorSelection: { residentKey: 'required', userVerification: 'required' },
+      extensions: { prf: { eval: { first: PRF_EVAL_INPUT } } },
+    },
+  })) as PublicKeyCredential | null;
+  if (!credential) {
+    throw new Error('WebAuthn credential creation was cancelled or failed');
+  }
+
+  const prfOutput = await obtainPrfOutputAfterCreate(credential);
+  return {
+    unlockMethod: 'passkey',
+    prfOutputB64: bytesToBase64(bufferSourceToBytes(prfOutput)),
+    credentialId: credential.id,
+    rpId: `chrome-extension://${browser.runtime.id}`,
+  };
+}
+
+// A file read from disk is fundamentally different from every other
+// message this store builds (a typed passphrase, a credential.id from a
+// real WebAuthn ceremony) -- it's arbitrary, possibly hand-edited content.
+// Validated here, BEFORE either restore action does anything else -- a
+// malformed file caught only by the background's own Zod validation would
+// still have already run a full WebAuthn ceremony first in
+// restoreWithPasskey's case, registering a real, un-revocable resident
+// credential on the user's authenticator for a restore that was always
+// going to fail (a Plan agent's finding).
+async function parseAndValidateBundleFile(file: File): Promise<VaultBackupBundle> {
+  const text = await file.text();
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error('That file is not valid JSON -- is it really a backup file?');
+  }
+  const result = VaultBackupBundleSchema.safeParse(parsed);
+  if (!result.success) {
+    throw new Error("That file doesn't look like an Identity Firewall backup.");
+  }
+  return result.data;
+}
+
+// Shared by restoreWithPasskey/restoreWithPassphrase -- the one part of
+// those two actions that's genuinely identical (message shape and response
+// type), extracted per a /code-review finding. The surrounding
+// status/try-catch skeleton is deliberately NOT extracted into this helper
+// -- every action in this store repeats that same skeleton inline (matching
+// stores/session.store.ts's own established convention), so folding it into
+// a shared wrapper here would be inconsistent with the rest of the file,
+// not more consistent.
+function sendRestoreVaultBackup(
+  bundle: VaultBackupBundle,
+  backupPassphrase: string,
+  newUnlockInput: UnlockInput,
+): Promise<MessageResponse<RestoreVaultBackupResponse>> {
+  const message: RestoreVaultBackupMessage = {
+    type: 'RESTORE_VAULT_BACKUP',
+    payload: { bundle, backupPassphrase, newUnlockInput },
+  };
+  return browser.runtime.sendMessage(message);
+}
+
+function downloadBackupBundle(bundle: VaultBackupBundle): void {
+  const json = JSON.stringify(bundle, null, 2);
+  const blob = new Blob([json], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  try {
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `identity-firewall-backup-${Date.now()}.json`;
+    anchor.click();
+  } finally {
+    URL.revokeObjectURL(url);
+  }
 }
 
 // create()/registration commonly reports prf.enabled: true without ever
@@ -147,31 +244,11 @@ export const useVaultStore = defineStore('vault', {
       this.error = null;
 
       try {
-        const credential = (await navigator.credentials.create({
-          publicKey: {
-            challenge: randomChallenge(),
-            rp: { name: 'Identity Firewall' },
-            user: { id: randomChallenge(), name: 'vault-unlock', displayName: 'Vault Unlock' },
-            pubKeyCredParams: [{ type: 'public-key', alg: -7 }],
-            authenticatorSelection: { residentKey: 'required', userVerification: 'required' },
-            extensions: { prf: { eval: { first: PRF_EVAL_INPUT } } },
-          },
-        })) as PublicKeyCredential | null;
-        if (!credential) {
-          throw new Error('WebAuthn credential creation was cancelled or failed');
-        }
-
-        const prfOutput = await obtainPrfOutputAfterCreate(credential);
-        const prfOutputB64 = bytesToBase64(bufferSourceToBytes(prfOutput));
+        const unlockInput = await createPasskeyUnlockInput();
 
         const message: CreateRootIdentityMessage = {
           type: 'CREATE_ROOT_IDENTITY',
-          payload: {
-            unlockMethod: 'passkey',
-            prfOutputB64,
-            credentialId: credential.id,
-            rpId: `chrome-extension://${browser.runtime.id}`,
-          },
+          payload: unlockInput,
         };
         const response: MessageResponse<Record<string, never>> =
           await browser.runtime.sendMessage(message);
@@ -179,7 +256,7 @@ export const useVaultStore = defineStore('vault', {
           this.initialized = true;
           this.locked = false;
           this.configuredUnlockMethod = 'passkey';
-          this.passkeyCredentialId = credential.id;
+          this.passkeyCredentialId = unlockInput.credentialId;
           this.status = 'loaded';
         } else {
           this.error = response.error;
@@ -312,6 +389,108 @@ export const useVaultStore = defineStore('vault', {
           await browser.runtime.sendMessage(message);
         if (response.ok) {
           this.locked = true;
+          this.status = 'loaded';
+        } else {
+          this.error = response.error;
+          this.status = 'error';
+        }
+      } catch (err) {
+        this.error = err instanceof Error ? err.message : String(err);
+        this.status = 'error';
+      }
+    },
+
+    async exportBackup(backupPassphrase: string): Promise<void> {
+      this.status = 'loading';
+      this.error = null;
+
+      const message: ExportVaultBackupMessage = {
+        type: 'EXPORT_VAULT_BACKUP',
+        payload: { backupPassphrase },
+      };
+
+      try {
+        const response: MessageResponse<ExportVaultBackupResponse> =
+          await browser.runtime.sendMessage(message);
+        if (response.ok) {
+          downloadBackupBundle(response.data);
+          this.status = 'loaded';
+        } else {
+          this.error = response.error;
+          this.status = 'error';
+        }
+      } catch (err) {
+        this.error = err instanceof Error ? err.message : String(err);
+        this.status = 'error';
+      }
+    },
+
+    // KNOWN LIMITATION, deliberately deferred (a /code-review finding):
+    // parseAndValidateBundleFile only checks the file's JSON SHAPE, not
+    // whether backupPassphrase actually decrypts it -- that decryption only
+    // happens in the background (background/vault/export.ts), since this
+    // store never touches crypto.subtle (see this file's own header
+    // comment). So a schema-valid file with a WRONG backupPassphrase, or one
+    // whose ciphertext got corrupted while staying schema-valid, still runs
+    // this full WebAuthn ceremony -- registering a real, un-revocable
+    // resident credential on the user's authenticator -- before the
+    // background's decryption fails and the restore is rejected. Properly
+    // closing this would mean adding a "verify this bundle decrypts"
+    // message the popup could check before ever touching WebAuthn, which is
+    // a real message-contract change, not a same-milestone bug fix -- left
+    // as a follow-up rather than done ad hoc here.
+    async restoreWithPasskey(file: File, backupPassphrase: string): Promise<void> {
+      this.status = 'loading';
+      this.error = null;
+
+      try {
+        const bundle = await parseAndValidateBundleFile(file);
+        const unlockInput = await createPasskeyUnlockInput();
+
+        const response: MessageResponse<RestoreVaultBackupResponse> = await sendRestoreVaultBackup(
+          bundle,
+          backupPassphrase,
+          unlockInput,
+        );
+        if (response.ok) {
+          this.initialized = true;
+          this.locked = false;
+          this.configuredUnlockMethod = 'passkey';
+          this.passkeyCredentialId = unlockInput.credentialId;
+          this.status = 'loaded';
+        } else {
+          this.error = response.error;
+          this.status = 'error';
+        }
+      } catch (err) {
+        this.error = err instanceof Error ? err.message : String(err);
+        this.status = 'error';
+      }
+    },
+
+    async restoreWithPassphrase(
+      file: File,
+      backupPassphrase: string,
+      newPassphrase: string,
+    ): Promise<void> {
+      this.status = 'loading';
+      this.error = null;
+
+      try {
+        const bundle = await parseAndValidateBundleFile(file);
+        const unlockInput: UnlockInput = {
+          unlockMethod: 'passphrase',
+          passphrase: newPassphrase,
+        };
+        const response: MessageResponse<RestoreVaultBackupResponse> = await sendRestoreVaultBackup(
+          bundle,
+          backupPassphrase,
+          unlockInput,
+        );
+        if (response.ok) {
+          this.initialized = true;
+          this.locked = false;
+          this.configuredUnlockMethod = 'passphrase';
           this.status = 'loaded';
         } else {
           this.error = response.error;

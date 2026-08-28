@@ -20,6 +20,8 @@ import {
 } from '../vault/credentials/handler';
 import {
   handleCreateRootIdentity,
+  handleExportVaultBackup,
+  handleRestoreVaultBackup,
   handleVaultLock,
   handleVaultStatus,
   handleVaultUnlock,
@@ -103,5 +105,13 @@ export const registry: Registry = {
   DELETE_CREDENTIAL: {
     capability: 'vault',
     handle: (message) => handleDeleteCredential(message),
+  },
+  EXPORT_VAULT_BACKUP: {
+    capability: 'vault',
+    handle: (message) => handleExportVaultBackup(message),
+  },
+  RESTORE_VAULT_BACKUP: {
+    capability: 'vault',
+    handle: (message) => handleRestoreVaultBackup(message),
   },
 };

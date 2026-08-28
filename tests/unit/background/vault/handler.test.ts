@@ -3,6 +3,8 @@ import { fakeBrowser } from 'wxt/testing/fake-browser';
 import { randomBytes } from '../../../../background/vault/crypto';
 import {
   handleCreateRootIdentity,
+  handleExportVaultBackup,
+  handleRestoreVaultBackup,
   handleVaultLock,
   handleVaultStatus,
   handleVaultUnlock,
@@ -11,6 +13,8 @@ import { VaultLockedError } from '../../../../background/vault/storage';
 import { bytesToBase64 } from '../../../../shared/bytes';
 import type {
   CreateRootIdentityMessage,
+  ExportVaultBackupMessage,
+  RestoreVaultBackupMessage,
   VaultLockMessage,
   VaultStatusMessage,
   VaultUnlockMessage,
@@ -108,5 +112,32 @@ describe('vault handlers', () => {
 
   it('VaultLockedError carries the literal message dispatch.ts surfaces to callers', () => {
     expect(new VaultLockedError().message).toBe('VAULT_LOCKED');
+  });
+
+  it('handleExportVaultBackup / handleRestoreVaultBackup round-trip through the handler layer', async () => {
+    await handleCreateRootIdentity({ type: 'CREATE_ROOT_IDENTITY', payload: passphraseInput });
+
+    const exportMessage: ExportVaultBackupMessage = {
+      type: 'EXPORT_VAULT_BACKUP',
+      payload: { backupPassphrase: 'backup-passphrase-1234' },
+    };
+    const bundle = await handleExportVaultBackup(exportMessage);
+    expect(bundle.formatVersion).toBe(1);
+    expect(bundle.kdf).toBe('argon2id');
+
+    // A restore onto this SAME already-initialized vault correctly rejects
+    // (restoreNewVault's own guard) -- proving the handler propagates
+    // export.ts's real error, not swallowing or reshaping it.
+    const restoreMessage: RestoreVaultBackupMessage = {
+      type: 'RESTORE_VAULT_BACKUP',
+      payload: {
+        bundle,
+        backupPassphrase: 'backup-passphrase-1234',
+        newUnlockInput: passphraseInput,
+      },
+    };
+    await expect(handleRestoreVaultBackup(restoreMessage)).rejects.toThrow(
+      'VAULT_ALREADY_INITIALIZED',
+    );
   });
 });

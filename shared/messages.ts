@@ -248,3 +248,8 @@ export type SetPersonalDataResponse = PersonalData;
 export type GetCredentialResponse = CredentialRecord[];
 export type SaveCredentialResponse = CredentialRecord;
 export type DeleteCredentialResponse = undefined;
+
+// EXPORT_VAULT_BACKUP/RESTORE_VAULT_BACKUP's response payload shapes
+// (background/vault/handler.ts), same direct-alias convention as above (M7).
+export type ExportVaultBackupResponse = VaultBackupBundle;
+export type RestoreVaultBackupResponse = Record<string, never>;

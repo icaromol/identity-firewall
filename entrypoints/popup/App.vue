@@ -11,6 +11,10 @@ const vault = useVaultStore();
 
 const setupPassphrase = ref('');
 const unlockPassphrase = ref('');
+const exportPassphrase = ref('');
+const restoreFile = ref<File | null>(null);
+const restoreBackupPassphrase = ref('');
+const restoreNewPassphrase = ref('');
 
 onMounted(() => {
   session.fetchSessionState();
@@ -27,6 +31,37 @@ function submitSetupPassphrase() {
 function submitUnlockPassphrase() {
   vault.unlockWithPassphrase(unlockPassphrase.value);
   unlockPassphrase.value = '';
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: called from @submit.prevent in <template> -- Biome only lints the <script> block, it can't see template usage.
+function submitExportBackup() {
+  vault.exportBackup(exportPassphrase.value);
+  exportPassphrase.value = '';
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: called from @change in <template> -- Biome only lints the <script> block, it can't see template usage.
+function onRestoreFileSelected(event: Event) {
+  const input = event.target as HTMLInputElement;
+  restoreFile.value = input.files?.[0] ?? null;
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: called from @click in <template> -- Biome only lints the <script> block, it can't see template usage.
+function clickRestoreWithPasskey() {
+  if (!restoreFile.value) return;
+  vault.restoreWithPasskey(restoreFile.value, restoreBackupPassphrase.value);
+  restoreBackupPassphrase.value = '';
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: called from @submit.prevent in <template> -- Biome only lints the <script> block, it can't see template usage.
+function submitRestoreWithPassphrase() {
+  if (!restoreFile.value) return;
+  vault.restoreWithPassphrase(
+    restoreFile.value,
+    restoreBackupPassphrase.value,
+    restoreNewPassphrase.value,
+  );
+  restoreBackupPassphrase.value = '';
+  restoreNewPassphrase.value = '';
 }
 </script>
 
@@ -113,6 +148,57 @@ function submitUnlockPassphrase() {
             Set up with Passphrase
           </button>
         </form>
+
+        <!-- Restore only makes sense pre-initialization -- restoreNewVault
+             (background/vault/setup.ts) rejects with VAULT_ALREADY_INITIALIZED
+             onto an already-set-up vault, matching this placement. -->
+        <div class="space-y-2 border-t border-neutral-800 pt-3">
+          <p class="text-xs font-semibold uppercase tracking-wide text-neutral-400">
+            Restore from backup
+          </p>
+          <input
+            type="file"
+            accept="application/json"
+            class="w-full text-xs text-neutral-300"
+            @change="onRestoreFileSelected"
+          />
+          <input
+            v-model="restoreBackupPassphrase"
+            type="password"
+            placeholder="Backup passphrase"
+            class="w-full rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-neutral-100"
+          />
+          <button
+            type="button"
+            class="w-full rounded bg-neutral-100 px-3 py-1.5 font-medium text-neutral-900 disabled:opacity-50"
+            :disabled="
+              vault.status === 'loading' || !restoreFile || restoreBackupPassphrase.length === 0
+            "
+            @click="clickRestoreWithPasskey"
+          >
+            Restore + new Passkey
+          </button>
+          <form class="space-y-2" @submit.prevent="submitRestoreWithPassphrase">
+            <input
+              v-model="restoreNewPassphrase"
+              type="password"
+              placeholder="Choose a new passphrase"
+              class="w-full rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-neutral-100"
+            />
+            <button
+              type="submit"
+              class="w-full rounded border border-neutral-700 px-3 py-1.5 text-neutral-300 disabled:opacity-50"
+              :disabled="
+                vault.status === 'loading' ||
+                !restoreFile ||
+                restoreBackupPassphrase.length === 0 ||
+                restoreNewPassphrase.length === 0
+              "
+            >
+              Restore + new Passphrase
+            </button>
+          </form>
+        </div>
       </div>
 
       <!-- Initialized but locked: unlock form, keyed off which method this
@@ -166,7 +252,9 @@ function submitUnlockPassphrase() {
       </div>
 
       <!-- Unlocked. Per decision 6, nothing about vault CONTENTS is shown
-           here -- just the fact that it's unlocked. -->
+           here -- just the fact that it's unlocked. Export only prompts for
+           a backup passphrase and triggers a download -- it doesn't display
+           any vault content either, so it's compatible with that rule. -->
       <div v-else class="mt-2 space-y-3">
         <p class="text-green-400">Vault unlocked.</p>
         <button
@@ -177,6 +265,25 @@ function submitUnlockPassphrase() {
         >
           Lock
         </button>
+
+        <form class="space-y-2 border-t border-neutral-800 pt-3" @submit.prevent="submitExportBackup">
+          <p class="text-xs font-semibold uppercase tracking-wide text-neutral-400">
+            Export backup
+          </p>
+          <input
+            v-model="exportPassphrase"
+            type="password"
+            placeholder="Choose a backup passphrase"
+            class="w-full rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-neutral-100"
+          />
+          <button
+            type="submit"
+            class="w-full rounded border border-neutral-700 px-3 py-1.5 text-neutral-300 disabled:opacity-50"
+            :disabled="vault.status === 'loading' || exportPassphrase.length === 0"
+          >
+            Download backup
+          </button>
+        </form>
       </div>
     </section>
   </main>

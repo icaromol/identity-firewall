@@ -1,10 +1,15 @@
 import type {
   CreateRootIdentityMessage,
+  ExportVaultBackupMessage,
+  ExportVaultBackupResponse,
+  RestoreVaultBackupMessage,
+  RestoreVaultBackupResponse,
   VaultLockMessage,
   VaultStatusMessage,
   VaultStatusResponse,
   VaultUnlockMessage,
 } from '../../shared/messages';
+import { exportVaultBackup, restoreVaultBackup } from './export';
 import { createRootIdentity } from './setup';
 import {
   getCachedUnlockKey,
@@ -42,5 +47,22 @@ export async function handleVaultUnlock(
 
 export async function handleVaultLock(_message: VaultLockMessage): Promise<Record<string, never>> {
   await lockVault();
+  return {};
+}
+
+export async function handleExportVaultBackup(
+  message: ExportVaultBackupMessage,
+): Promise<ExportVaultBackupResponse> {
+  return exportVaultBackup(message.payload.backupPassphrase);
+}
+
+export async function handleRestoreVaultBackup(
+  message: RestoreVaultBackupMessage,
+): Promise<RestoreVaultBackupResponse> {
+  await restoreVaultBackup(
+    message.payload.bundle,
+    message.payload.backupPassphrase,
+    message.payload.newUnlockInput,
+  );
   return {};
 }

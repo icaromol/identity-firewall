@@ -21,6 +21,20 @@ Object.defineProperty(globalThis.navigator, 'credentials', {
   configurable: true,
 });
 
+// jsdom doesn't implement URL.createObjectURL/revokeObjectURL by default
+// (confirmed empirically) -- shimmed the same way navigator.credentials is
+// above, purely so exportBackup's download path has something to call.
+const mockCreateObjectURL = vi.fn(() => 'blob:mock-url');
+const mockRevokeObjectURL = vi.fn();
+Object.defineProperty(globalThis.URL, 'createObjectURL', {
+  value: mockCreateObjectURL,
+  configurable: true,
+});
+Object.defineProperty(globalThis.URL, 'revokeObjectURL', {
+  value: mockRevokeObjectURL,
+  configurable: true,
+});
+
 // Uint8Array<ArrayBuffer>, not bare Uint8Array: .buffer needs to type-check
 // as ArrayBuffer (not the wider ArrayBufferLike) when handed to
 // fixtureCredential -- see background/vault/crypto.ts's header comment for
@@ -54,12 +68,28 @@ function fixtureCredential(options: { id?: string; prfResultsFirst?: ArrayBuffer
   };
 }
 
+function fixtureBundle() {
+  return {
+    formatVersion: 1 as const,
+    kdf: 'argon2id' as const,
+    kdfParams: { t: 2, m: 19456, p: 1 },
+    argon2SaltB64: 'c2FsdA',
+    ivB64: 'aXY',
+    ciphertextB64: 'Y2lwaGVy',
+  };
+}
+
 describe('useVaultStore', () => {
+  let clickSpy: ReturnType<typeof vi.spyOn>;
+
   beforeEach(() => {
     fakeBrowser.reset();
     setActivePinia(createPinia());
     mockCreate.mockReset();
     mockGet.mockReset();
+    mockCreateObjectURL.mockClear();
+    mockRevokeObjectURL.mockClear();
+    clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
   });
 
   describe('fetchStatus', () => {
@@ -271,6 +301,146 @@ describe('useVaultStore', () => {
 
       expect(sendMessage).toHaveBeenCalledWith({ type: 'VAULT_LOCK' });
       expect(store.locked).toBe(true);
+    });
+  });
+
+  describe('exportBackup', () => {
+    it('sends EXPORT_VAULT_BACKUP and triggers a download of the returned bundle', async () => {
+      const bundle = fixtureBundle();
+      const sendMessage = vi
+        .spyOn(fakeBrowser.runtime, 'sendMessage')
+        .mockResolvedValueOnce({ ok: true, data: bundle } as never);
+
+      const store = useVaultStore();
+      await store.exportBackup('backup-passphrase-1234');
+
+      expect(sendMessage).toHaveBeenCalledWith({
+        type: 'EXPORT_VAULT_BACKUP',
+        payload: { backupPassphrase: 'backup-passphrase-1234' },
+      });
+      expect(mockCreateObjectURL).toHaveBeenCalledTimes(1);
+      expect(clickSpy).toHaveBeenCalledTimes(1);
+      expect(mockRevokeObjectURL).toHaveBeenCalledWith('blob:mock-url');
+      expect(store.status).toBe('loaded');
+    });
+
+    it('sets error state on a handler-level failure without attempting a download', async () => {
+      vi.spyOn(fakeBrowser.runtime, 'sendMessage').mockResolvedValueOnce({
+        ok: false,
+        error: 'VAULT_LOCKED',
+      } as never);
+
+      const store = useVaultStore();
+      await store.exportBackup('backup-passphrase-1234');
+
+      expect(store.status).toBe('error');
+      expect(store.error).toBe('VAULT_LOCKED');
+      expect(mockCreateObjectURL).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('restoreWithPassphrase', () => {
+    it('sends RESTORE_VAULT_BACKUP with the parsed bundle and sets the full success state tail', async () => {
+      const bundle = fixtureBundle();
+      const file = new File([JSON.stringify(bundle)], 'backup.json', {
+        type: 'application/json',
+      });
+      const sendMessage = vi
+        .spyOn(fakeBrowser.runtime, 'sendMessage')
+        .mockResolvedValueOnce({ ok: true, data: {} } as never);
+
+      const store = useVaultStore();
+      await store.restoreWithPassphrase(file, 'backup-passphrase-1234', 'a new passphrase');
+
+      expect(sendMessage).toHaveBeenCalledWith({
+        type: 'RESTORE_VAULT_BACKUP',
+        payload: {
+          bundle,
+          backupPassphrase: 'backup-passphrase-1234',
+          newUnlockInput: { unlockMethod: 'passphrase', passphrase: 'a new passphrase' },
+        },
+      });
+      expect(store.initialized).toBe(true);
+      expect(store.locked).toBe(false);
+      expect(store.configuredUnlockMethod).toBe('passphrase');
+      expect(store.status).toBe('loaded');
+    });
+
+    it('sets error state on malformed JSON without sending any message', async () => {
+      const file = new File(['not valid json'], 'backup.json', { type: 'application/json' });
+      // mockClear(): this spy's call history accumulates across every test
+      // in this file (vi.spyOn returns the same underlying mock on repeated
+      // calls against the same method), so a "never called" assertion needs
+      // its own clean slate rather than the file's whole history.
+      const sendMessage = vi.spyOn(fakeBrowser.runtime, 'sendMessage');
+      sendMessage.mockClear();
+
+      const store = useVaultStore();
+      await store.restoreWithPassphrase(file, 'backup-passphrase-1234', 'a new passphrase');
+
+      expect(store.status).toBe('error');
+      expect(sendMessage).not.toHaveBeenCalled();
+    });
+
+    it('sets error state on a file that parses as JSON but fails schema validation', async () => {
+      const file = new File([JSON.stringify({ not: 'a backup' })], 'backup.json', {
+        type: 'application/json',
+      });
+      const sendMessage = vi.spyOn(fakeBrowser.runtime, 'sendMessage');
+      sendMessage.mockClear();
+
+      const store = useVaultStore();
+      await store.restoreWithPassphrase(file, 'backup-passphrase-1234', 'a new passphrase');
+
+      expect(store.status).toBe('error');
+      expect(sendMessage).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('restoreWithPasskey', () => {
+    it('validates the file BEFORE running any WebAuthn ceremony -- a malformed file never touches navigator.credentials', async () => {
+      const file = new File(['not valid json'], 'backup.json', { type: 'application/json' });
+
+      const store = useVaultStore();
+      await store.restoreWithPasskey(file, 'backup-passphrase-1234');
+
+      expect(store.status).toBe('error');
+      expect(mockCreate).not.toHaveBeenCalled();
+    });
+
+    it('runs the passkey ceremony and sends RESTORE_VAULT_BACKUP for a valid file', async () => {
+      const bundle = fixtureBundle();
+      const file = new File([JSON.stringify(bundle)], 'backup.json', {
+        type: 'application/json',
+      });
+      const prfOutput = fixturePrfOutput();
+      mockCreate.mockResolvedValueOnce(fixtureCredential({ prfResultsFirst: prfOutput.buffer }));
+      const sendMessage = vi
+        .spyOn(fakeBrowser.runtime, 'sendMessage')
+        .mockResolvedValueOnce({ ok: true, data: {} } as never);
+
+      const store = useVaultStore();
+      await store.restoreWithPasskey(file, 'backup-passphrase-1234');
+
+      expect(mockCreate).toHaveBeenCalledTimes(1);
+      expect(sendMessage).toHaveBeenCalledWith({
+        type: 'RESTORE_VAULT_BACKUP',
+        payload: {
+          bundle,
+          backupPassphrase: 'backup-passphrase-1234',
+          newUnlockInput: {
+            unlockMethod: 'passkey',
+            prfOutputB64: bytesToBase64(prfOutput),
+            credentialId: 'fixture-credential-id',
+            rpId: 'chrome-extension://test-extension-id',
+          },
+        },
+      });
+      expect(store.initialized).toBe(true);
+      expect(store.locked).toBe(false);
+      expect(store.configuredUnlockMethod).toBe('passkey');
+      expect(store.passkeyCredentialId).toBe('fixture-credential-id');
+      expect(store.status).toBe('loaded');
     });
   });
 });

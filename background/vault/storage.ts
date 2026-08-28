@@ -30,6 +30,7 @@ import {
   VaultDataSchema,
 } from '../../shared/vault-schema';
 import { decryptBlob, encryptBlob, generateAesGcmKeyFromBits } from './crypto';
+import { createSerialQueue } from './serialQueue';
 
 const VAULT_BLOB_STORAGE_KEY = 'if_vault_blob_v1';
 const UNLOCK_KEY_STORAGE_KEY = 'if_vault_unlock_key_v1';
@@ -119,16 +120,8 @@ async function persistVaultData(vaultData: VaultData, key: CryptoKey): Promise<v
 
 // Serializes every write to the vault blob, generalizing
 // background/session/state.ts's exact pattern from "per-origin map mutation"
-// to "whole-vault-blob mutation" -- the queue variable itself swallows
-// errors (so one failed write doesn't permanently wedge later calls), but
-// the promise returned to each caller is not swallowed and still rejects.
-let writeQueue: Promise<void> = Promise.resolve();
-
-function enqueue(task: () => Promise<void>): Promise<void> {
-  const result = writeQueue.then(task);
-  writeQueue = result.catch(() => {});
-  return result;
-}
+// to "whole-vault-blob mutation".
+const enqueue = createSerialQueue();
 
 // For the FIRST-EVER write only (M4's createRootIdentity). Kept separate
 // from updateVaultData rather than folded in: updateVaultData's mutator
