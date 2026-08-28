@@ -28,23 +28,29 @@ const BACKUP_EXPORT_PERSONALIZATION = new TextEncoder().encode(
   'identity-firewall:backup-export:v1',
 );
 
+// Returns raw derived key bits, not a CryptoKey -- callers that need an
+// actual CryptoKey call generateAesGcmKeyFromBits(bits) themselves. This is
+// deliberate, not an oversight: a CryptoKey object cannot survive a
+// browser.storage.session round-trip (confirmed empirically -- its
+// properties are WebIDL prototype accessors, not own-enumerable data, so
+// storage's JSON-based serialization silently reduces it to `{}`), and
+// storage.ts's cached VaultUnlockKey must survive an MV3 service-worker
+// restart via storage.session. Only the raw bits can make that trip.
 export async function deriveVaultUnlockKey(
   input: UnlockInput,
   fixedAppSalt: Uint8Array,
   argon2Params: Argon2Params = DEFAULT_ARGON2_PARAMS,
-): Promise<CryptoKey> {
+): Promise<Uint8Array> {
   if (input.unlockMethod === 'passkey') {
     const prfBytes = base64ToBytes(input.prfOutputB64);
-    const bits = await deriveHkdfBits(prfBytes, fixedAppSalt, PASSKEY_UNLOCK_INFO, 256);
-    return generateAesGcmKeyFromBits(bits);
+    return deriveHkdfBits(prfBytes, fixedAppSalt, PASSKEY_UNLOCK_INFO, 256);
   }
   const passwordBytes = new TextEncoder().encode(input.passphrase);
-  const bits = await argon2idAsync(passwordBytes, fixedAppSalt, {
+  return argon2idAsync(passwordBytes, fixedAppSalt, {
     ...argon2Params,
     dkLen: 32,
     personalization: PASSPHRASE_UNLOCK_PERSONALIZATION,
   });
-  return generateAesGcmKeyFromBits(bits);
 }
 
 export function generateRootSecret(): Uint8Array {

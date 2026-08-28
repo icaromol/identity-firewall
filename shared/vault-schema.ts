@@ -43,21 +43,21 @@ export type Argon2Params = z.infer<typeof Argon2ParamsSchema>;
 // --- RootIdentity ---
 // rootSecretB64 is the HKDF ikm for every Service Identity derivation
 // (ADR-010) -- generated once at setup (M4), encrypted at rest as part of
-// the whole vault blob. FixedAppSalt and VaultUnlockKey are deliberately
-// NOT part of this schema -- FixedAppSalt lives unencrypted in
-// browser.storage.local (HKDF salts aren't secret), and VaultUnlockKey is
-// never persisted anywhere, session-cached only (see
-// docs/plans/phase-2-local-identity-vault.md's three-key hierarchy).
+// the whole vault blob. FixedAppSalt, VaultUnlockKey, and
+// passphraseArgon2Params are deliberately NOT part of this schema --
+// FixedAppSalt lives unencrypted in browser.storage.local (HKDF salts
+// aren't secret), VaultUnlockKey is never persisted anywhere, session-cached
+// only (see docs/plans/phase-2-local-identity-vault.md's three-key
+// hierarchy), and passphraseArgon2Params (ADR-012) also lives unencrypted in
+// browser.storage.local -- background/vault/storage.ts's
+// getPassphraseArgon2Params/setPassphraseArgon2Params -- specifically
+// because the passphrase-unlock derivation needs to read it BEFORE it can
+// derive the key that decrypts this very blob; putting it inside the
+// encrypted tree (M2's original placement) was a chicken-and-egg bug caught
+// during M3.
 export const RootIdentitySchema = z.object({
   rootSecretB64: z.string(),
   createdAt: z.number(), // epoch ms
-  // Only present when passphrase-unlock is configured (M4 populates it).
-  // Recorded per-vault, not read from a hardcoded default, so retuning
-  // Argon2's cost parameters in a later release never silently strands an
-  // existing vault's passphrase unlock -- the same problem FixedAppSalt's
-  // "never regenerate" rule solves for HKDF's salt, applied to Argon2's
-  // cost dial instead (ADR-012).
-  passphraseArgon2Params: Argon2ParamsSchema.optional(),
 });
 export type RootIdentity = z.infer<typeof RootIdentitySchema>;
 

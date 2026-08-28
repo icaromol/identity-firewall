@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import {
   AliasRecordSchema,
   CredentialRecordSchema,
-  RootIdentitySchema,
   ServiceIdentityRecordSchema,
   VaultDataSchema,
 } from '../../../shared/vault-schema';
@@ -49,34 +48,6 @@ describe('VaultDataSchema', () => {
       },
     });
     expect(result.success).toBe(true);
-  });
-});
-
-describe('RootIdentitySchema', () => {
-  it('accepts a tree without passphraseArgon2Params (passkey-only unlock)', () => {
-    const result = RootIdentitySchema.safeParse({
-      rootSecretB64: 'c2VjcmV0',
-      createdAt: Date.now(),
-    });
-    expect(result.success).toBe(true);
-  });
-
-  it('accepts a tree with passphraseArgon2Params (passphrase unlock configured)', () => {
-    const result = RootIdentitySchema.safeParse({
-      rootSecretB64: 'c2VjcmV0',
-      createdAt: Date.now(),
-      passphraseArgon2Params: { t: 2, m: 19456, p: 1 },
-    });
-    expect(result.success).toBe(true);
-  });
-
-  it('rejects passphraseArgon2Params with a non-positive field', () => {
-    const result = RootIdentitySchema.safeParse({
-      rootSecretB64: 'c2VjcmV0',
-      createdAt: Date.now(),
-      passphraseArgon2Params: { t: 0, m: 19456, p: 1 },
-    });
-    expect(result.success).toBe(false);
   });
 });
 

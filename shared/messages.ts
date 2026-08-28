@@ -146,8 +146,9 @@ export const DeleteCredentialMessageSchema = z.object({
 export type DeleteCredentialMessage = z.infer<typeof DeleteCredentialMessageSchema>;
 
 // --- Popup -> Background: secure export / local backup ---
-// Argon2ParamsSchema itself now lives in vault-schema.ts (M2) -- also
-// referenced by RootIdentitySchema.passphraseArgon2Params, not just this
+// Argon2ParamsSchema itself lives in vault-schema.ts (M2) -- also read/
+// written unencrypted via background/vault/storage.ts's
+// getPassphraseArgon2Params/setPassphraseArgon2Params (M3), not just this
 // backup bundle.
 
 export const VaultBackupBundleSchema = z.object({

@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { decryptBlob, encryptBlob, randomBytes } from '../../../../background/vault/crypto';
+import {
+  decryptBlob,
+  encryptBlob,
+  generateAesGcmKeyFromBits,
+  randomBytes,
+} from '../../../../background/vault/crypto';
 import {
   DEFAULT_ARGON2_PARAMS,
   deriveBackupExportKey,
@@ -35,15 +40,17 @@ async function roundTrips(key: CryptoKey): Promise<boolean> {
 }
 
 describe('deriveVaultUnlockKey', () => {
-  it('derives a usable AES-GCM key from a passkey UnlockInput', async () => {
+  it('derives usable raw key bits from a passkey UnlockInput', async () => {
     const fixedAppSalt = randomBytes(32);
-    const key = await deriveVaultUnlockKey(passkeyInput(), fixedAppSalt, CHEAP_ARGON2_PARAMS);
+    const bits = await deriveVaultUnlockKey(passkeyInput(), fixedAppSalt, CHEAP_ARGON2_PARAMS);
+    const key = await generateAesGcmKeyFromBits(bits);
     expect(await roundTrips(key)).toBe(true);
   });
 
-  it('derives a usable AES-GCM key from a passphrase UnlockInput', async () => {
+  it('derives usable raw key bits from a passphrase UnlockInput', async () => {
     const fixedAppSalt = randomBytes(32);
-    const key = await deriveVaultUnlockKey(passphraseInput(), fixedAppSalt, CHEAP_ARGON2_PARAMS);
+    const bits = await deriveVaultUnlockKey(passphraseInput(), fixedAppSalt, CHEAP_ARGON2_PARAMS);
+    const key = await generateAesGcmKeyFromBits(bits);
     expect(await roundTrips(key)).toBe(true);
   });
 
@@ -51,8 +58,10 @@ describe('deriveVaultUnlockKey', () => {
     const fixedAppSalt = randomBytes(32);
     const input = passkeyInput();
 
-    const keyA = await deriveVaultUnlockKey(input, fixedAppSalt, CHEAP_ARGON2_PARAMS);
-    const keyB = await deriveVaultUnlockKey(input, fixedAppSalt, CHEAP_ARGON2_PARAMS);
+    const bitsA = await deriveVaultUnlockKey(input, fixedAppSalt, CHEAP_ARGON2_PARAMS);
+    const bitsB = await deriveVaultUnlockKey(input, fixedAppSalt, CHEAP_ARGON2_PARAMS);
+    const keyA = await generateAesGcmKeyFromBits(bitsA);
+    const keyB = await generateAesGcmKeyFromBits(bitsB);
 
     const plaintext = new TextEncoder().encode('hello vault');
     const { iv, ciphertext } = await encryptBlob(keyA, plaintext);
@@ -64,8 +73,10 @@ describe('deriveVaultUnlockKey', () => {
     const fixedAppSalt = randomBytes(32);
     const input = passphraseInput();
 
-    const keyA = await deriveVaultUnlockKey(input, fixedAppSalt, CHEAP_ARGON2_PARAMS);
-    const keyB = await deriveVaultUnlockKey(input, fixedAppSalt, CHEAP_ARGON2_PARAMS);
+    const bitsA = await deriveVaultUnlockKey(input, fixedAppSalt, CHEAP_ARGON2_PARAMS);
+    const bitsB = await deriveVaultUnlockKey(input, fixedAppSalt, CHEAP_ARGON2_PARAMS);
+    const keyA = await generateAesGcmKeyFromBits(bitsA);
+    const keyB = await generateAesGcmKeyFromBits(bitsB);
 
     const plaintext = new TextEncoder().encode('hello vault');
     const { iv, ciphertext } = await encryptBlob(keyA, plaintext);
@@ -73,10 +84,12 @@ describe('deriveVaultUnlockKey', () => {
     expect(new TextDecoder().decode(decrypted)).toBe('hello vault');
   });
 
-  it('derives a key that cannot decrypt ciphertext produced under a different fixedAppSalt', async () => {
+  it('derives bits that cannot decrypt ciphertext produced under a different fixedAppSalt', async () => {
     const input = passkeyInput();
-    const keyA = await deriveVaultUnlockKey(input, randomBytes(32), CHEAP_ARGON2_PARAMS);
-    const keyB = await deriveVaultUnlockKey(input, randomBytes(32), CHEAP_ARGON2_PARAMS);
+    const bitsA = await deriveVaultUnlockKey(input, randomBytes(32), CHEAP_ARGON2_PARAMS);
+    const bitsB = await deriveVaultUnlockKey(input, randomBytes(32), CHEAP_ARGON2_PARAMS);
+    const keyA = await generateAesGcmKeyFromBits(bitsA);
+    const keyB = await generateAesGcmKeyFromBits(bitsB);
 
     const plaintext = new TextEncoder().encode('hello vault');
     const { iv, ciphertext } = await encryptBlob(keyA, plaintext);
@@ -86,7 +99,8 @@ describe('deriveVaultUnlockKey', () => {
 
   it('works end to end with DEFAULT_ARGON2_PARAMS (the real production cost)', async () => {
     const fixedAppSalt = randomBytes(32);
-    const key = await deriveVaultUnlockKey(passphraseInput(), fixedAppSalt, DEFAULT_ARGON2_PARAMS);
+    const bits = await deriveVaultUnlockKey(passphraseInput(), fixedAppSalt, DEFAULT_ARGON2_PARAMS);
+    const key = await generateAesGcmKeyFromBits(bits);
     expect(await roundTrips(key)).toBe(true);
   });
 });
@@ -123,11 +137,12 @@ describe('deriveBackupExportKey', () => {
     const sharedSalt = randomBytes(32);
     const passphrase = 'same passphrase reused on purpose';
 
-    const unlockKey = await deriveVaultUnlockKey(
+    const unlockBits = await deriveVaultUnlockKey(
       { unlockMethod: 'passphrase', passphrase },
       sharedSalt,
       CHEAP_ARGON2_PARAMS,
     );
+    const unlockKey = await generateAesGcmKeyFromBits(unlockBits);
     const backupKey = await deriveBackupExportKey(passphrase, sharedSalt, CHEAP_ARGON2_PARAMS);
 
     const plaintext = new TextEncoder().encode('hello vault');
