@@ -1,17 +1,25 @@
-// The encrypted vault blob's read/write module, and the session-cached
-// VaultUnlockKey. The only file that touches the encrypted vault blob or the
+// Three-tier encrypted vault storage (ADR-015,
+// docs/plans/phase-2-vault-tiering-refactor.md), and the session-cached
+// VaultUnlockKey. The only file that touches an encrypted vault blob or the
 // unlock-key cache directly -- background/vault/salt.ts still owns
 // FixedAppSalt via its own direct browser.storage.local calls, unchanged.
 //
-// updateVaultData is the one function allowed to MUTATE an existing vault
-// blob -- every capability module (M5/M6/M7) funnels writes through it,
-// never touching browser.storage.local directly. This is the structural fix
-// for Attestto's dual-vault-drift bug (research/attestto-teardown.md §8):
-// one write path, not a discipline to remember. initializeVaultData is kept
-// as a separate function for the FIRST-EVER write, not folded into
-// updateVaultData -- see its own comment below for why. Both funnel through
-// the single private persistVaultData(), so "one write path" means one
-// function, not just one name.
+// Three independent encrypted surfaces, sharing the generic
+// readEncryptedBlob/persistEncryptedBlob helpers below instead of each
+// reimplementing "decrypt with schema validation" / "encrypt and persist":
+//
+//   Index (if_vault_index_v1)          -- RootIdentity + per-origin metadata
+//   Personal data (if_vault_personal_data_v1) -- unchanged PersonalData shape, own key
+//   Site payload (if_vault_site_<payloadStorageKey>_v1), one per origin -- real credential/alias values
+//
+// Each tier gets its own serializing queue (createSerialQueue()) so an
+// unrelated site's write never blocks on this site's write, or on an
+// index/personal-data write -- one shared queue for the whole vault would
+// serialize completely independent operations for no real reason. This
+// module previously stored everything as one whole encrypted blob (M3);
+// that API (readVaultData/updateVaultData/initializeVaultData/
+// VaultDataSchema) was migrated off by the vault tiering refactor's Steps
+// 4-6 and deleted here in Step 7 once nothing referenced it anymore.
 //
 // getCachedUnlockKey/setCachedUnlockKey cache raw derived key BITS in
 // browser.storage.session, never a CryptoKey object -- confirmed empirically
@@ -30,19 +38,16 @@ import {
   PersonalDataSchema,
   type SitePayload,
   SitePayloadSchema,
-  type VaultData,
-  VaultDataSchema,
   type VaultIndex,
   VaultIndexSchema,
 } from '../../shared/vault-schema';
 import { decryptBlob, encryptBlob, generateAesGcmKeyFromBits } from './crypto';
 import { createSerialQueue } from './serialQueue';
 
-const VAULT_BLOB_STORAGE_KEY = 'if_vault_blob_v1';
-const UNLOCK_KEY_STORAGE_KEY = 'if_vault_unlock_key_v1';
 const PASSPHRASE_KDF_STORAGE_KEY = 'if_vault_passphrase_kdf_v1';
 const UNLOCK_METHOD_STORAGE_KEY = 'if_vault_unlock_method_v1';
 const PASSKEY_CREDENTIAL_ID_STORAGE_KEY = 'if_vault_passkey_credential_id_v1';
+const UNLOCK_KEY_STORAGE_KEY = 'if_vault_unlock_key_v1';
 
 export class VaultLockedError extends Error {
   constructor() {
@@ -73,11 +78,6 @@ const EncryptedVaultBlobSchema = z.object({
   ciphertextB64: z.string(),
 });
 
-export async function vaultBlobExists(): Promise<boolean> {
-  const stored = await browser.storage.local.get(VAULT_BLOB_STORAGE_KEY);
-  return stored[VAULT_BLOB_STORAGE_KEY] !== undefined;
-}
-
 export async function getCachedUnlockKey(): Promise<CryptoKey | null> {
   const stored = await browser.storage.session.get(UNLOCK_KEY_STORAGE_KEY);
   const raw = stored[UNLOCK_KEY_STORAGE_KEY];
@@ -99,102 +99,6 @@ export async function setCachedUnlockKey(bits: Uint8Array): Promise<void> {
 
 export async function clearCachedUnlockKey(): Promise<void> {
   await browser.storage.session.remove(UNLOCK_KEY_STORAGE_KEY);
-}
-
-export async function decryptVaultDataWithKey(key: CryptoKey): Promise<VaultData> {
-  const stored = await browser.storage.local.get(VAULT_BLOB_STORAGE_KEY);
-  const parsed = EncryptedVaultBlobSchema.safeParse(stored[VAULT_BLOB_STORAGE_KEY]);
-  if (!parsed.success) {
-    throw new VaultNotInitializedError();
-  }
-  const iv = base64ToBytes(parsed.data.ivB64);
-  const ciphertext = base64ToBytes(parsed.data.ciphertextB64);
-  const plaintext = await decryptBlob(key, iv, ciphertext); // rejects with OperationError on a wrong key/corrupted data -- left unwrapped
-  return VaultDataSchema.parse(JSON.parse(new TextDecoder().decode(plaintext)));
-}
-
-async function persistVaultData(vaultData: VaultData, key: CryptoKey): Promise<void> {
-  const plaintext = new TextEncoder().encode(JSON.stringify(vaultData));
-  const { iv, ciphertext } = await encryptBlob(key, plaintext);
-  await browser.storage.local.set({
-    [VAULT_BLOB_STORAGE_KEY]: {
-      ivB64: bytesToBase64(iv),
-      ciphertextB64: bytesToBase64(ciphertext),
-    },
-  });
-}
-
-// Serializes every write to the vault blob, generalizing
-// background/session/state.ts's exact pattern from "per-origin map mutation"
-// to "whole-vault-blob mutation".
-const enqueue = createSerialQueue();
-
-// For the FIRST-EVER write only (M4's createRootIdentity). Kept separate
-// from updateVaultData rather than folded in: updateVaultData's mutator
-// contract requires a full, already-valid VaultData as input, but
-// RootIdentitySchema.rootSecretB64 is non-optional, so there is no valid
-// placeholder "draft" a first-ever call could hand a mutator. Treating "no
-// blob yet" and "blob exists but locked" as the same code path risks those
-// two states someday being conflated -- a real vault silently reinitialized
-// under some future refactor. Two named, differently-erroring functions is
-// the safer structural choice, even though M4's own plan bullet describes
-// initial creation as going "via updateVaultData" -- a deviation documented
-// here rather than silently worked around.
-export function initializeVaultData(vaultData: VaultData, key: CryptoKey): Promise<void> {
-  return enqueue(async () => {
-    if (await vaultBlobExists()) {
-      throw new VaultAlreadyInitializedError();
-    }
-    const validated = VaultDataSchema.parse(vaultData);
-    await persistVaultData(validated, key);
-  });
-}
-
-export function updateVaultData(mutator: (draft: VaultData) => VaultData): Promise<void> {
-  return enqueue(async () => {
-    const key = await getCachedUnlockKey();
-    if (!key) {
-      throw new VaultLockedError();
-    }
-    const current = await decryptVaultDataWithKey(key);
-    const next = VaultDataSchema.parse(mutator(current));
-    await persistVaultData(next, key);
-  });
-}
-
-// A variant of updateVaultData for mutators that also need to hand a value
-// back to their caller (e.g. "the record that was created or already
-// existed"). Introduced at M6 once a third near-identical
-// `let result: T | undefined; ...; if (!result) throw ...` block appeared
-// across background/identity/storage.ts, background/vault/credentials/
-// storage.ts, and background/vault/personalData/storage.ts (a /code-review
-// finding) -- factored into one place here rather than left as copy-pasted
-// convention across three files. Wrapping `result` in `{ result: T }` avoids
-// the `T | undefined` ambiguity a bare capture variable would have if some
-// future T were itself legitimately undefined.
-export async function updateVaultDataWithResult<T>(
-  mutator: (draft: VaultData) => { next: VaultData; result: T },
-): Promise<T> {
-  let captured: { result: T } | undefined;
-  await updateVaultData((draft) => {
-    const { next, result } = mutator(draft);
-    captured = { result };
-    return next;
-  });
-  if (!captured) {
-    // Unreachable in practice -- the mutator above always assigns captured
-    // before its own return.
-    throw new Error('updateVaultDataWithResult: mutator did not assign a result');
-  }
-  return captured.result;
-}
-
-export async function readVaultData(): Promise<VaultData> {
-  const key = await getCachedUnlockKey();
-  if (!key) {
-    throw new VaultLockedError();
-  }
-  return decryptVaultDataWithKey(key);
 }
 
 export async function getPassphraseArgon2Params(): Promise<Argon2Params | undefined> {
@@ -261,7 +165,7 @@ export async function getPasskeyCredentialId(): Promise<string | undefined> {
 // window where an interrupted setup (an MV3 service-worker restart is a
 // normal lifecycle event, not a rare crash) could persist
 // configuredUnlockMethod: 'passkey' with no matching passkeyCredentialId,
-// permanently stranding the vault (initializeVaultData already succeeded,
+// permanently stranding the vault (initializeVaultIndex already succeeded,
 // so a retry throws VaultAlreadyInitializedError with no repair path). A
 // single multi-key .set() call is applied together by the browser, so
 // method and its credential/params now always land or fail as one unit.
@@ -284,30 +188,7 @@ export async function setUnlockMethodMetadata(
 }
 
 // ===========================================================================
-// Three-tier vault storage (ADR-015, docs/plans/phase-2-vault-tiering-refactor.md).
-//
-// Everything above this line is the ORIGINAL whole-blob API (M3) --
-// deliberately left in place and unused by the tiering refactor's Step 3,
-// per that plan's own instruction: later steps (4-6) migrate every caller
-// off it, and Step 6 deletes it once nothing references it anymore.
-//
-// Three independent encrypted surfaces, sharing the generic
-// readEncryptedBlob/persistEncryptedBlob helpers below instead of each
-// reimplementing "decrypt with schema validation" / "encrypt and persist":
-//
-//   Index (if_vault_index_v1)          -- RootIdentity + per-origin metadata
-//   Personal data (if_vault_personal_data_v1) -- unchanged PersonalData shape, own key
-//   Site payload (if_vault_site_<payloadStorageKey>_v1), one per origin -- real credential/alias values
-//
-// Each tier gets its own serializing queue (createSerialQueue(), the same
-// primitive the old writeQueue above now uses) so an unrelated site's write
-// never blocks on this site's write, or on an index/personal-data write --
-// one global queue for the whole vault (the old behavior above) would
-// serialize completely independent operations for no real reason.
-//
-// getCachedUnlockKey/setCachedUnlockKey/clearCachedUnlockKey above are
-// UNCHANGED and shared by all three tiers below -- the session-cached-bits
-// mechanism from M3 is orthogonal to how many encrypted blobs exist.
+// The three tiers themselves (ADR-015).
 
 const VAULT_INDEX_STORAGE_KEY = 'if_vault_index_v1';
 const PERSONAL_DATA_STORAGE_KEY = 'if_vault_personal_data_v1';
@@ -331,7 +212,7 @@ async function readEncryptedBlob<T>(
   }
   const iv = base64ToBytes(parsed.data.ivB64);
   const ciphertext = base64ToBytes(parsed.data.ciphertextB64);
-  const plaintext = await decryptBlob(key, iv, ciphertext); // rejects with OperationError on a wrong key/corrupted data -- left unwrapped, same convention as the whole-blob API above
+  const plaintext = await decryptBlob(key, iv, ciphertext); // rejects with OperationError on a wrong key/corrupted data -- left unwrapped
   return schema.parse(JSON.parse(new TextDecoder().decode(plaintext)));
 }
 
@@ -343,12 +224,10 @@ async function persistEncryptedBlob<T>(storageKey: string, data: T, key: CryptoK
   });
 }
 
-// Shared by all three tiers' *WithResult variants below -- the same
-// "capture a value out of a mutator, throw if it was somehow never
-// assigned" pattern updateVaultDataWithResult (above) was built to
-// deduplicate for ONE tier now needs deduplicating across THREE, so this
-// generalizes over any update-shaped function rather than tripling that
-// same block again.
+// Shared by all three tiers' *WithResult variants below -- generalizes over
+// any update-shaped function so "capture a value out of a mutator, throw if
+// it was somehow never assigned" lives in exactly one place instead of
+// being copy-pasted per tier.
 async function withResult<D, T>(
   update: (mutator: (draft: D) => D) => Promise<void>,
   mutator: (draft: D) => { next: D; result: T },
@@ -375,8 +254,16 @@ export async function vaultIndexExists(): Promise<boolean> {
   return blobExists(VAULT_INDEX_STORAGE_KEY);
 }
 
-// Explicit key, no lock check -- mirrors initializeVaultData above exactly:
-// this runs during the FIRST-EVER write, before any key is cached.
+// Explicit key, no lock check -- this runs during the FIRST-EVER write,
+// before any key is cached. Kept separate from updateVaultIndex rather than
+// folded in: updateVaultIndex's mutator contract requires a full,
+// already-valid VaultIndex as input, but RootIdentitySchema.rootSecretB64
+// is non-optional, so there is no valid placeholder "draft" a first-ever
+// call could hand a mutator. Treating "no index yet" and "index exists but
+// locked" as the same code path risks those two states someday being
+// conflated -- a real vault silently reinitialized under some future
+// refactor. Two named, differently-erroring functions is the safer
+// structural choice.
 export function initializeVaultIndex(index: VaultIndex, key: CryptoKey): Promise<void> {
   return indexQueue(async () => {
     if (await blobExists(VAULT_INDEX_STORAGE_KEY)) {
@@ -413,8 +300,7 @@ export async function readVaultIndex(): Promise<VaultIndex> {
   return readEncryptedBlob(VAULT_INDEX_STORAGE_KEY, VaultIndexSchema, key);
 }
 
-// Takes an EXPLICIT key rather than the cached one -- mirrors
-// decryptVaultDataWithKey above exactly, for the same reason: unlockVault
+// Takes an EXPLICIT key rather than the cached one -- unlockVault
 // (background/vault/unlock.ts) needs to verify a freshly-derived,
 // not-yet-cached key by attempting to decrypt with it BEFORE caching
 // anything, so it can't go through readVaultIndex's getCachedUnlockKey()
@@ -470,16 +356,19 @@ export async function readPersonalDataBlob(): Promise<PersonalData> {
 // Unlike the index/personal-data tiers above, a site payload is NEVER
 // encrypted with the cached VaultUnlockKey directly -- it's encrypted with
 // a key derived on demand from RootSecret + origin
-// (background/vault/siteKey.ts's deriveSitePayloadKey, Step 2), which the
-// CALLER must derive and pass in explicitly (this module has no way to
-// obtain RootSecret itself without first reading the index, and doing that
-// here would couple this generic storage layer to identity-specific
-// lookup logic that belongs in background/identity/storage.ts and
-// background/vault/credentials/storage.ts, Step 5-6). Every function below
-// still independently checks getCachedUnlockKey() as a defense-in-depth
-// VaultLockedError guard -- structurally, a caller can only have obtained
-// a valid siteKey by having already unlocked the vault to read the index
-// first, but this makes that invariant explicit rather than assumed.
+// (background/vault/siteKey.ts's deriveSitePayloadKey), which the CALLER
+// must derive and pass in explicitly (this module has no way to obtain
+// RootSecret itself without first reading the index, and doing that here
+// would couple this generic storage layer to identity-specific lookup
+// logic that belongs in background/identity/storage.ts and
+// background/vault/credentials/storage.ts). updateSitePayload/
+// readSitePayload below still independently check getCachedUnlockKey() as
+// a defense-in-depth VaultLockedError guard -- structurally, a caller can
+// only have obtained a valid siteKey by having already unlocked the vault
+// to read the index first, but this makes that invariant explicit rather
+// than assumed. initializeSitePayload deliberately does NOT have this
+// guard -- see its own comment for why (setup.ts's restore/create bootstrap
+// calls it before the vault is nominally "unlocked" at all).
 //
 // One serializing queue PER payloadStorageKey, created on demand -- a
 // single shared queue here would serialize completely unrelated sites'
@@ -496,16 +385,23 @@ function getSitePayloadQueue(payloadStorageKey: string): ReturnType<typeof creat
   return queue;
 }
 
+// No getCachedUnlockKey() guard here, unlike updateSitePayload/
+// readSitePayload below -- a real bug found while implementing restore
+// (vault tiering refactor Step 7): setup.ts's writeNewVault calls this
+// DURING first-ever vault bootstrap, before setCachedUnlockKey ever runs
+// (that's deliberately the LAST step of that sequence), so a lock check
+// here would reject a completely legitimate restore/create with a false
+// VaultLockedError. The check was never load-bearing for this function
+// specifically -- its own VaultAlreadyInitializedError guard is what
+// actually protects it, and identity/storage.ts's createServiceIdentity
+// (the OTHER caller, mid-session) can only reach this point after already
+// proving the vault is unlocked via its own prior readVaultIndex call.
 export function initializeSitePayload(
   payloadStorageKey: string,
   data: SitePayload,
   siteKey: CryptoKey,
 ): Promise<void> {
   return getSitePayloadQueue(payloadStorageKey)(async () => {
-    const unlockKey = await getCachedUnlockKey();
-    if (!unlockKey) {
-      throw new VaultLockedError();
-    }
     const storageKey = sitePayloadStorageKey(payloadStorageKey);
     if (await blobExists(storageKey)) {
       throw new VaultAlreadyInitializedError();

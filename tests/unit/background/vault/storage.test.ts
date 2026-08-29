@@ -8,19 +8,16 @@ import {
 } from '../../../../background/vault/crypto';
 import {
   clearCachedUnlockKey,
-  decryptVaultDataWithKey,
   getCachedUnlockKey,
   getConfiguredUnlockMethod,
   getPasskeyCredentialId,
   getPassphraseArgon2Params,
   initializePersonalDataBlob,
   initializeSitePayload,
-  initializeVaultData,
   initializeVaultIndex,
   PassphraseArgon2ParamsCorruptedError,
   readPersonalDataBlob,
   readSitePayload,
-  readVaultData,
   readVaultIndex,
   setCachedUnlockKey,
   setPassphraseArgon2Params,
@@ -29,35 +26,15 @@ import {
   updatePersonalDataBlobWithResult,
   updateSitePayload,
   updateSitePayloadWithResult,
-  updateVaultData,
   updateVaultIndex,
   updateVaultIndexWithResult,
   VaultAlreadyInitializedError,
   VaultLockedError,
   VaultNotInitializedError,
-  vaultBlobExists,
   vaultIndexExists,
 } from '../../../../background/vault/storage';
 import { bytesToBase64 } from '../../../../shared/bytes';
-import type {
-  PersonalData,
-  SitePayload,
-  VaultData,
-  VaultIndex,
-} from '../../../../shared/vault-schema';
-
-function minimalVaultData(overrides: Partial<VaultData> = {}): VaultData {
-  return {
-    schemaVersion: 1,
-    rootIdentity: { rootSecretB64: 'c2VjcmV0', createdAt: Date.now() },
-    personalData: {},
-    serviceIdentities: {},
-    aliasProviderConfig: { provider: 'none' },
-    policies: [],
-    privacyLedger: [],
-    ...overrides,
-  };
-}
+import type { PersonalData, SitePayload, VaultIndex } from '../../../../shared/vault-schema';
 
 function minimalVaultIndex(overrides: Partial<VaultIndex> = {}): VaultIndex {
   return {
@@ -83,18 +60,6 @@ function minimalSitePayload(overrides: Partial<SitePayload> = {}): SitePayload {
 describe('vault storage', () => {
   beforeEach(() => {
     fakeBrowser.reset();
-  });
-
-  describe('vaultBlobExists', () => {
-    it('is false before any vault is initialized', async () => {
-      expect(await vaultBlobExists()).toBe(false);
-    });
-
-    it('is true after initializeVaultData', async () => {
-      const key = await generateAesGcmKeyFromBits(randomBytes(32));
-      await initializeVaultData(minimalVaultData(), key);
-      expect(await vaultBlobExists()).toBe(true);
-    });
   });
 
   describe('getCachedUnlockKey / setCachedUnlockKey / clearCachedUnlockKey', () => {
@@ -132,99 +97,6 @@ describe('vault storage', () => {
     });
   });
 
-  describe('initializeVaultData / readVaultData / updateVaultData', () => {
-    it('throws VaultLockedError from readVaultData when no key is cached', async () => {
-      await expect(readVaultData()).rejects.toThrow(VaultLockedError);
-    });
-
-    it('throws VaultNotInitializedError when a key is cached but no blob exists', async () => {
-      const bits = randomBytes(32);
-      await setCachedUnlockKey(bits);
-      await expect(readVaultData()).rejects.toThrow(VaultNotInitializedError);
-    });
-
-    it('round-trips an initial vault through initializeVaultData and readVaultData', async () => {
-      const bits = randomBytes(32);
-      const key = await generateAesGcmKeyFromBits(bits);
-      const initial = minimalVaultData();
-
-      await initializeVaultData(initial, key);
-      await setCachedUnlockKey(bits);
-
-      expect(await readVaultData()).toEqual(initial);
-    });
-
-    it('throws VaultAlreadyInitializedError on a second initializeVaultData call', async () => {
-      const key = await generateAesGcmKeyFromBits(randomBytes(32));
-      await initializeVaultData(minimalVaultData(), key);
-      await expect(initializeVaultData(minimalVaultData(), key)).rejects.toThrow(
-        VaultAlreadyInitializedError,
-      );
-    });
-
-    it('persists a mutation made through updateVaultData', async () => {
-      const bits = randomBytes(32);
-      const key = await generateAesGcmKeyFromBits(bits);
-      await initializeVaultData(minimalVaultData(), key);
-      await setCachedUnlockKey(bits);
-
-      await updateVaultData((draft) => ({
-        ...draft,
-        personalData: { ...draft.personalData, email: 'alice@example.com' },
-      }));
-
-      const data = await readVaultData();
-      expect(data.personalData.email).toBe('alice@example.com');
-    });
-
-    it('rejects a mutator that returns schema-invalid data', async () => {
-      const bits = randomBytes(32);
-      const key = await generateAesGcmKeyFromBits(bits);
-      await initializeVaultData(minimalVaultData(), key);
-      await setCachedUnlockKey(bits);
-
-      await expect(
-        updateVaultData(
-          () =>
-            ({
-              schemaVersion: 2, // invalid: must be literal 1
-            }) as unknown as VaultData,
-        ),
-      ).rejects.toThrow();
-    });
-
-    it('survives two concurrent updateVaultData calls mutating different sub-trees', async () => {
-      const bits = randomBytes(32);
-      const key = await generateAesGcmKeyFromBits(bits);
-      await initializeVaultData(minimalVaultData(), key);
-      await setCachedUnlockKey(bits);
-
-      await Promise.all([
-        updateVaultData((draft) => ({
-          ...draft,
-          personalData: { ...draft.personalData, email: 'alice@example.com' },
-        })),
-        updateVaultData((draft) => ({
-          ...draft,
-          privacyLedger: [
-            ...draft.privacyLedger,
-            {
-              origin: 'https://example.com',
-              at: 1,
-              requestedFields: [],
-              disclosedFields: [],
-              deniedFields: [],
-            },
-          ],
-        })),
-      ]);
-
-      const data = await readVaultData();
-      expect(data.personalData.email).toBe('alice@example.com');
-      expect(data.privacyLedger).toHaveLength(1);
-    });
-  });
-
   describe('getPassphraseArgon2Params / setPassphraseArgon2Params', () => {
     it('returns undefined when never configured', async () => {
       expect(await getPassphraseArgon2Params()).toBeUndefined();
@@ -240,16 +112,6 @@ describe('vault storage', () => {
       await expect(getPassphraseArgon2Params()).rejects.toThrow(
         PassphraseArgon2ParamsCorruptedError,
       );
-    });
-  });
-
-  describe('decryptVaultDataWithKey', () => {
-    it('rejects when decrypting with the wrong key', async () => {
-      const key = await generateAesGcmKeyFromBits(randomBytes(32));
-      const wrongKey = await generateAesGcmKeyFromBits(randomBytes(32));
-      await initializeVaultData(minimalVaultData(), key);
-
-      await expect(decryptVaultDataWithKey(wrongKey)).rejects.toThrow();
     });
   });
 
@@ -453,11 +315,16 @@ describe('vault storage', () => {
       await expect(readSitePayload('payload-key-a', siteKey)).rejects.toThrow(VaultLockedError);
     });
 
-    it('throws VaultLockedError from initializeSitePayload when no VaultUnlockKey is cached', async () => {
+    it("initializeSitePayload does NOT require a cached VaultUnlockKey -- setup.ts's bootstrap calls it before one exists", async () => {
+      // A real bug found implementing restore (vault tiering refactor Step
+      // 7): setup.ts's writeNewVault calls initializeSitePayload during
+      // first-ever vault bootstrap, before setCachedUnlockKey ever runs.
+      // initializeSitePayload's own VaultAlreadyInitializedError guard is
+      // what actually protects it -- see its own comment in storage.ts.
       const siteKey = await generateAesGcmKeyFromBits(randomBytes(32));
       await expect(
         initializeSitePayload('payload-key-a', minimalSitePayload(), siteKey),
-      ).rejects.toThrow(VaultLockedError);
+      ).resolves.toBeUndefined();
     });
 
     it('round-trips through initializeSitePayload and readSitePayload', async () => {

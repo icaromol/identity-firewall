@@ -4,11 +4,14 @@
 // and Aliases provider integration is Phase 6's -- see
 // docs/plans/phase-2-local-identity-vault.md's scope boundary table.
 //
-// Credentials and Aliases are nested per-ServiceIdentity, not top-level
-// VaultData fields, despite data-model.md's own ASCII tree suggesting
-// otherwise -- both that doc's own prose bullet and identity-model.md are
-// explicit that each Service Identity "holds... credentials, aliases...".
-// The tree diagram is conceptual, not a literal storage layout.
+// Storage is split across three independently-encrypted tiers
+// (docs/adr/ADR-015-three-tier-vault-storage.md): VaultIndexSchema
+// (RootIdentity + per-origin metadata only, decrypted on every unlock),
+// PersonalDataSchema (its own storage key), and SitePayloadSchema (one per
+// origin, holding that site's real Credentials/Aliases VALUES -- decrypted
+// only when that specific origin is actually accessed). data-model.md's own
+// ASCII tree predates this split and reads as one nested document; it's
+// conceptual, not a literal storage layout.
 
 import { z } from 'zod';
 
@@ -43,7 +46,7 @@ export type Argon2Params = z.infer<typeof Argon2ParamsSchema>;
 // --- RootIdentity ---
 // rootSecretB64 is the HKDF ikm for every Service Identity derivation
 // (ADR-010) -- generated once at setup (M4), encrypted at rest as part of
-// the whole vault blob. FixedAppSalt, VaultUnlockKey, and
+// the Tier 1 index (ADR-015). FixedAppSalt, VaultUnlockKey, and
 // passphraseArgon2Params are deliberately NOT part of this schema --
 // FixedAppSalt lives unencrypted in browser.storage.local (HKDF salts
 // aren't secret), VaultUnlockKey is never persisted anywhere, session-cached
@@ -162,37 +165,19 @@ export const ServiceIdentityHistoryEntrySchema = z.object({
 });
 export type ServiceIdentityHistoryEntry = z.infer<typeof ServiceIdentityHistoryEntrySchema>;
 
-// @deprecated Superseded by ServiceIdentityMetaSchema (ADR-015's index
-// tier, below) + SitePayloadSchema (ADR-015's per-site payload tier, near
-// VaultIndexSchema below) -- this single-record shape nests real
-// credential/alias VALUES inline, exactly what the vault storage tiering
-// refactor (docs/plans/phase-2-vault-tiering-refactor.md) moves out of the
-// always-decrypted index. Kept until that plan's Step 6 migrates its last
-// consumer, then deleted.
-export const ServiceIdentityRecordSchema = z.object({
-  origin: z.string(), // CanonicalOrigin (shared/origin.ts) as a plain string -- the branded type is TS-only, not preserved through JSON storage
-  identifierB64: z.string(), // the derived Ed25519 public key for this origin (ADR-010, built in M5)
-  createdAt: z.number(),
-  // At most one credential per `kind` -- DELETE_CREDENTIAL (shared/messages.ts)
-  // identifies which credential to remove by { origin, kind } alone, which
-  // is only unambiguous under this constraint.
-  credentials: z
-    .array(CredentialRecordSchema)
-    .refine((credentials) => new Set(credentials.map((c) => c.kind)).size === credentials.length, {
-      message: 'at most one credential per kind is allowed per service identity',
-    }),
-  aliases: z.array(AliasRecordSchema),
-  history: z.array(ServiceIdentityHistoryEntrySchema),
-});
-export type ServiceIdentityRecord = z.infer<typeof ServiceIdentityRecordSchema>;
-
 // --- ServiceIdentityMeta (Tier 1 index entry, ADR-015) ---
 // Metadata-only per-origin view: enough to answer "which sites do I have
 // an account for" and "what kind of credential does this site have" without
 // ever decrypting that site's actual secret values (Tier 3, SitePayloadSchema
-// near VaultIndexSchema below).
+// near VaultIndexSchema below). Supersedes the pre-tiering-refactor
+// ServiceIdentityRecordSchema, which nested real credential/alias VALUES
+// inline -- exactly what the vault storage tiering refactor
+// (docs/plans/phase-2-vault-tiering-refactor.md, ADR-015) moves out of the
+// always-decrypted index. That older schema was deleted once its last
+// consumer was migrated (Step 7) -- see git history if the old shape is
+// ever needed for reference.
 export const ServiceIdentityMetaSchema = z.object({
-  origin: z.string(), // CanonicalOrigin as a plain string, same convention as ServiceIdentityRecordSchema.origin above
+  origin: z.string(), // CanonicalOrigin as a plain string, same convention as every other origin field in this file
   identifierB64: z.string(), // the derived Ed25519 public key for this origin (ADR-010)
   createdAt: z.number(),
   // Which credential KINDS exist, not their values -- the whole point of
@@ -234,27 +219,13 @@ export const PrivacyLedgerEntrySchema = z.object({
 });
 export type PrivacyLedgerEntry = z.infer<typeof PrivacyLedgerEntrySchema>;
 
-// --- The whole vault (deprecated, ADR-015) ---
-// @deprecated Superseded by the three-tier split below: VaultIndexSchema
-// (RootIdentity + per-origin metadata only), PersonalDataSchema in its own
-// top-level storage key (unchanged shape, new home), and SitePayloadSchema
-// per origin (real credential/alias values). See
-// docs/adr/ADR-015-three-tier-vault-storage.md. Kept until
-// docs/plans/phase-2-vault-tiering-refactor.md's Step 6 migrates its last
-// consumer (background/vault/storage.ts's whole-blob read/write functions),
-// then deleted.
-export const VaultDataSchema = z.object({
-  schemaVersion: z.literal(1),
-  rootIdentity: RootIdentitySchema,
-  personalData: PersonalDataSchema,
-  serviceIdentities: z.record(z.string(), ServiceIdentityRecordSchema), // keyed by CanonicalOrigin
-  aliasProviderConfig: AliasProviderConfigSchema,
-  policies: z.array(PolicyRuleSchema),
-  privacyLedger: z.array(PrivacyLedgerEntrySchema),
-});
-export type VaultData = z.infer<typeof VaultDataSchema>;
-
 // --- Vault Index (Tier 1, ADR-015) ---
+// Supersedes the pre-tiering-refactor VaultDataSchema, which held
+// RootIdentity, PersonalData, and every origin's full credential/alias
+// values as one single-encrypted tree. See
+// docs/adr/ADR-015-three-tier-vault-storage.md; that older schema was
+// deleted once its last consumer (background/vault/storage.ts's
+// whole-blob read/write functions) was migrated (Step 7).
 // Decrypted on every unlock -- RootIdentity plus per-origin METADATA ONLY
 // (ServiceIdentityMetaSchema above), no credential/alias VALUES and no
 // PersonalData (that's its own tier, Tier 2, stored under a completely

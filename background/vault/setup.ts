@@ -1,20 +1,9 @@
 // createRootIdentity generates a fresh vault index; persistNewVault is the
-// shared tail (derive key -> initialize index + empty personal-data blob ->
-// persist unlock metadata -> cache key), reused by restoreNewVault below
-// with a RESTORED VaultIndex instead of a fresh one -- factored out in M4
-// (and adapted for the vault storage tiering refactor, ADR-015) so restore
-// doesn't need to duplicate this logic.
-//
-// No site payloads are created here -- those come later, lazily, on first
-// credential/alias save for a given origin (identity/storage.ts's
-// createServiceIdentity, vault tiering refactor Step 5).
-//
-// restoreNewVault's OWN restore of real personal data and real site
-// payloads (from a decrypted backup bundle) is deliberately NOT handled
-// here -- writeNewVault below always initializes an EMPTY personal-data
-// blob for both entry points, and restoreVaultBackup (background/vault/
-// export.ts) re-partitioning a real backup bundle into all three tiers is
-// the vault tiering refactor's own Step 7, not this one.
+// shared tail (derive key -> initialize index + personal-data blob + any
+// site payloads -> persist unlock metadata -> cache key), reused by
+// restoreNewVault below with RESTORED trees instead of fresh/empty ones --
+// factored out in M4 (and adapted for the vault storage tiering refactor,
+// ADR-015) so restore doesn't need to duplicate this logic.
 //
 // firstVaultWriteQueue (M7): persistNewVault and restoreNewVault are BOTH
 // "the first thing ever written to this vault" -- storage.ts's own
@@ -29,15 +18,18 @@
 // with no error anywhere (a Plan agent's finding). This queue closes that
 // gap by serializing the ENTIRE first-write sequence -- salt install
 // included -- for both entry points against each other.
-import { bytesToBase64 } from '../../shared/bytes';
+import { base64ToBytes, bytesToBase64 } from '../../shared/bytes';
 import type { UnlockInput } from '../../shared/messages';
-import type { VaultIndex } from '../../shared/vault-schema';
+import { normalizeOrigin } from '../../shared/origin';
+import type { PersonalData, SitePayload, VaultIndex } from '../../shared/vault-schema';
 import { generateAesGcmKeyFromBits } from './crypto';
 import { DEFAULT_ARGON2_PARAMS, deriveVaultUnlockKey, generateRootSecret } from './keys';
 import { getOrCreateFixedAppSalt, setFixedAppSalt } from './salt';
 import { createSerialQueue } from './serialQueue';
+import { deriveSitePayloadKey } from './siteKey';
 import {
   initializePersonalDataBlob,
+  initializeSitePayload,
   initializeVaultIndex,
   setCachedUnlockKey,
   setUnlockMethodMetadata,
@@ -47,7 +39,22 @@ import {
 
 const enqueueFirstVaultWrite = createSerialQueue();
 
-async function writeNewVault(index: VaultIndex, unlockInput: UnlockInput): Promise<void> {
+// One entry per origin being restored, with a FRESHLY-minted
+// payloadStorageKey -- the original device's values are meaningless on this
+// device (ADR-015, vault tiering refactor Step 7). `payload.origin` already
+// carries the origin (SitePayloadSchema's own redundant field), so no
+// separate origin field is needed here.
+export interface SitePayloadToWrite {
+  payloadStorageKey: string;
+  payload: SitePayload;
+}
+
+async function writeNewVault(
+  index: VaultIndex,
+  unlockInput: UnlockInput,
+  personalData: PersonalData,
+  sitePayloadsToWrite: SitePayloadToWrite[],
+): Promise<void> {
   const fixedAppSalt = await getOrCreateFixedAppSalt();
   // DEFAULT_ARGON2_PARAMS is passed unconditionally -- deriveVaultUnlockKey
   // simply ignores it on the passkey branch, and this avoids re-evaluating
@@ -62,7 +69,21 @@ async function writeNewVault(index: VaultIndex, unlockInput: UnlockInput): Promi
   // creation. Nothing below is written until this succeeds, so a losing
   // racer/retry can never stomp an existing vault's unlock metadata or cache.
   await initializeVaultIndex(index, key);
-  await initializePersonalDataBlob({}, key);
+  await initializePersonalDataBlob(personalData, key);
+
+  // Site payloads are keyed by their OWN derived key (never the vault
+  // unlock key `key` above) -- deriveSitePayloadKey needs RootSecret, which
+  // this `index` already carries (freshly generated for createRootIdentity,
+  // or restored for restoreNewVault). Empty for the fresh-setup path
+  // (createRootIdentity never has any yet -- those come later, lazily, on
+  // first credential/alias save, identity/storage.ts's createServiceIdentity).
+  const rootSecret = base64ToBytes(index.rootIdentity.rootSecretB64);
+  await Promise.all(
+    sitePayloadsToWrite.map(async ({ payloadStorageKey, payload }) => {
+      const siteKey = await deriveSitePayloadKey(rootSecret, normalizeOrigin(payload.origin));
+      await initializeSitePayload(payloadStorageKey, payload, siteKey);
+    }),
+  );
 
   // setUnlockMethodMetadata writes the method and its matching
   // credential/params in ONE storage call -- see its own comment in
@@ -79,7 +100,7 @@ async function writeNewVault(index: VaultIndex, unlockInput: UnlockInput): Promi
 }
 
 export function persistNewVault(index: VaultIndex, unlockInput: UnlockInput): Promise<void> {
-  return enqueueFirstVaultWrite(() => writeNewVault(index, unlockInput));
+  return enqueueFirstVaultWrite(() => writeNewVault(index, unlockInput, {}, []));
 }
 
 export function createRootIdentity(unlockInput: UnlockInput): Promise<void> {
@@ -107,6 +128,8 @@ export function createRootIdentity(unlockInput: UnlockInput): Promise<void> {
 // way back.
 export function restoreNewVault(
   index: VaultIndex,
+  personalData: PersonalData,
+  sitePayloadsToWrite: SitePayloadToWrite[],
   fixedAppSalt: Uint8Array,
   unlockInput: UnlockInput,
 ): Promise<void> {
@@ -115,6 +138,6 @@ export function restoreNewVault(
       throw new VaultAlreadyInitializedError();
     }
     await setFixedAppSalt(fixedAppSalt);
-    await writeNewVault(index, unlockInput);
+    await writeNewVault(index, unlockInput, personalData, sitePayloadsToWrite);
   });
 }

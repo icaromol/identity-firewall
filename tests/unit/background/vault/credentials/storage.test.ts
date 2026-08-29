@@ -70,7 +70,7 @@ describe('credentials storage', () => {
     expect(credentials).toEqual([replacement]);
   });
 
-  it('saveCredential auto-creates the ServiceIdentityRecord for a new origin', async () => {
+  it('saveCredential auto-creates the ServiceIdentityMeta for a new origin', async () => {
     expect(await getServiceIdentity(origin)).toBeNull();
 
     await saveCredential(origin, passwordCredential);

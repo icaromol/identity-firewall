@@ -10,7 +10,7 @@
 // key. No @noble/curves fallback needed (ADR-014).
 //
 // The private key is NEVER persisted anywhere -- only identifierB64 (the
-// public key) goes into ServiceIdentityRecord. Re-derive on demand via this
+// public key) goes into ServiceIdentityMeta. Re-derive on demand via this
 // function whenever the private key is needed again (e.g. future signing),
 // never cache a CryptoKey -- this is what makes the vault "recoverable from
 // RootSecret alone" (ADR-010).
