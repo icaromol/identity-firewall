@@ -4,7 +4,7 @@ This document defines what data the vault holds, how each field is classified by
 
 ## The vault's data tree
 
-Conceptually, everything the system stores lives in one encrypted tree:
+Conceptually, everything the system stores is this one logical tree:
 
 ```text
 Vault
@@ -20,14 +20,24 @@ Vault
 
 - **RootIdentity** — the single root key and derivation material described in [identity-model.md](identity-model.md). Never leaves the vault.
 - **PersonalData** — the user's actual attributes (name, email, phone, CPF/national ID, address, birth date). This is the pool that gets selectively, explicitly disclosed — never handed over wholesale.
-- **ServiceIdentities** — one entry per origin. Each holds the identifier, credentials, aliases, passkeys, and history for that specific site, as defined in [identity-model.md](identity-model.md).
+- **ServiceIdentities** — one entry per origin: an identifier, which credential *kinds* exist and how many aliases, and history, for that specific site, as defined in [identity-model.md](identity-model.md). The actual credential/alias *values* are not part of this entry — see "Storage tiers" below.
 - **Credentials** — passwords and passkeys, scoped per service identity.
 - **Aliases** — generated substitute values (email aliases, usernames, etc.) used in place of real personal data where appropriate. An email alias entry round-trips the fields a real alias provider actually needs: `provider` (e.g. `simplelogin`, `addy`, or `none`), `providerAliasId` (the provider's own ID, needed to later toggle/delete it), `value` (the alias address itself), and `note`/`hostname` (the site it was minted for — SimpleLogin has a native `hostname` field for exactly this; addy.io does not, so we own that tagging convention ourselves via its `description` field). See `docs/research/email-alias-integration.md` for the full provider comparison.
 - **AliasProviderConfig** — optional, user-supplied configuration for an email-alias provider: `provider` (`none` by default), the user's own API key for that provider, and an optional base URL override to support a self-hosted instance. This key is never sent anywhere except directly from the user's browser to the provider endpoint the user themselves configured — see the "our server vs. the user's own chosen third party" distinction in [ADR-007](adr/ADR-007-no-server-dependency.md).
 - **Policies** — the rules that decide, per field and per sensitivity level, whether to auto-allow, alias, ask, or deny. The engine that applies these lives in `docs/privacy-model.md` (sibling doc); this document only defines the data those policies act on.
 - **PrivacyLedger** — a local (never blockchain) log of what each site requested, what was disclosed, what was denied, and how the disclosure was authorized. Its behavior is detailed in `docs/privacy-model.md` (sibling doc).
 
-How each of these fields is actually encrypted at rest, and how keys are managed, is covered in `docs/security-model.md` (sibling doc) — this document is about the shape of the data, not its protection mechanism.
+### Storage tiers (not one blob)
+
+This logical tree is **not** stored as a single encrypted blob. Per [ADR-015](adr/ADR-015-three-tier-vault-storage.md), it's split across three independently-encrypted tiers, so that checking one site's credentials never requires decrypting every other site's secrets, PersonalData, or anything else:
+
+| Tier | Holds | Decrypted when |
+|---|---|---|
+| **Index** | RootIdentity + per-origin metadata only (identifier, credential *kinds* present, alias count, history) — no credential/alias values | Every unlock |
+| **Personal data** | PersonalData, unchanged shape, its own independent ciphertext | Whenever PersonalData is read/written |
+| **Site payload** (one per origin) | That origin's real Credentials/Aliases values | Only when that specific origin is actually accessed |
+
+How each tier is actually encrypted, and how its key is derived, is covered in `docs/security-model.md` (sibling doc) — this document is about the shape of the data, not its protection mechanism.
 
 ## Field sensitivity classification
 

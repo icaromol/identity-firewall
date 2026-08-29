@@ -75,7 +75,7 @@ Never sent to any site. Holds:
 
 ### Service Identity
 
-Created for one specific origin (e.g. `github.com`, `reddit.com`, `discord.com`). Holds, per origin:
+Created for one specific origin (e.g. `github.com`, `reddit.com`, `discord.com`). Conceptually holds, per origin:
 
 - identifier
 - credentials
@@ -83,7 +83,7 @@ Created for one specific origin (e.g. `github.com`, `reddit.com`, `discord.com`)
 - passkeys *(see footnote below — reference, not custody, under the MVP's WebAuthn integration mode)*
 - history
 
-The full storage structure these live in is documented in [data-model.md](data-model.md); encryption at rest is covered in `docs/security-model.md` (sibling doc).
+Per [ADR-015](adr/ADR-015-three-tier-vault-storage.md), this isn't one storage record: the identifier, which credential *kinds* exist, alias *count*, and history are metadata that lives in the always-decrypted index; the actual credential/alias *values* live in a separate, per-origin encrypted payload that's only decrypted when that specific origin is actually accessed. A site's real secrets are never incidentally exposed just because some *other* site's identity was looked up. The full storage structure is documented in [data-model.md](data-model.md); encryption at rest is covered in `docs/security-model.md` (sibling doc).
 
 > **Footnote on "passkeys":** under the MVP's chosen WebAuthn integration mode ([ADR-011](adr/ADR-011-webauthn-metadata-only-mode.md)), a Service Identity does not hold passkey private-key material the way it holds an alias or a password. It holds a *reference* — the relying-party ID and credential ID the user's real authenticator (OS platform authenticator, hardware key, or another password manager) already manages — for our own bookkeeping of "which Service Identity does this credential belong to." The private key itself never enters this vault; it lives in the OS/hardware authenticator, exactly as WebAuthn intends. A later phase could adopt full custody (the extension becomes its own software WebAuthn authenticator, as Bitwarden/1Password do) — see `docs/research/webauthn-technical-notes.md` and ADR-011 for why that's a materially larger, explicitly deferred scope, not the MVP's default.
 
