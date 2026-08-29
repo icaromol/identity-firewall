@@ -112,7 +112,7 @@ describe('vault backup export/restore', () => {
     expect(saltWrites).toHaveLength(0);
   });
 
-  it("two concurrent first-vault-writes never mix one call's VaultData with the other's FixedAppSalt", async () => {
+  it("two concurrent first-vault-writes never mix one call's index with the other's FixedAppSalt", async () => {
     const origin = normalizeOrigin('https://a.example');
 
     // Build a bundle from an entirely separate, pre-existing vault (its own
