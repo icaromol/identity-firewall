@@ -83,6 +83,7 @@ describe('persistNewVault', () => {
       aliasProviderConfig: { provider: 'none' },
       policies: [],
       privacyLedger: [],
+      highTrustOrigins: [],
     };
 
     await persistNewVault(providedIndex, passphraseInput);

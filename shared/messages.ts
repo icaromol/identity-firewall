@@ -14,12 +14,14 @@ import { z } from 'zod';
 import type {
   CredentialRecord,
   PersonalData,
+  PersonalDataFieldName,
   ResponseType,
   ServiceIdentityMeta,
 } from './vault-schema';
 import {
   Argon2ParamsSchema,
   CredentialRecordSchema,
+  PersonalDataFieldNameSchema,
   PersonalDataSchema,
   ResponseTypeSchema,
   SensitivityLevelSchema,
@@ -46,21 +48,6 @@ export const DetectedFormSchema = z.object({
   fields: z.array(DetectedFieldSchema),
 });
 export type DetectedForm = z.infer<typeof DetectedFormSchema>;
-
-// The literal set of PersonalDataSchema's own keys -- kept in exact sync
-// with vault-schema.ts's PersonalDataSchema by hand (zod has no built-in
-// "enum of this object schema's keys" helper); PERSONAL_DATA_FIELD_SENSITIVITY
-// in vault-schema.ts is a Record<keyof PersonalData, ...>, so a drift here
-// would surface as a TypeScript error there, not silently.
-export const PersonalDataFieldNameSchema = z.enum([
-  'name',
-  'email',
-  'phone',
-  'nationalId',
-  'address',
-  'birthDate',
-]);
-export type PersonalDataFieldName = z.infer<typeof PersonalDataFieldNameSchema>;
 
 // background/firewall/classifier.ts's output shape (Phase 3) -- lives here,
 // not in that background module, so the message contract (GET_PENDING_REQUEST

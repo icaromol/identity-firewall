@@ -26,11 +26,10 @@ import type {
   GetPendingRequestMessage,
   MessageResponse,
   PendingRequest,
-  PersonalDataFieldName,
   SubmitFieldDecisionsMessage,
   SubmitFieldDecisionsResponse,
 } from '../shared/messages';
-import type { ResponseType } from '../shared/vault-schema';
+import type { PersonalDataFieldName, ResponseType } from '../shared/vault-schema';
 
 function compoundKey(formIndex: number, fieldKey: string): string {
   return `${formIndex}:${fieldKey}`;

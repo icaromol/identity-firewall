@@ -5,12 +5,11 @@ import type {
   ClassifiedForm,
   GetPendingRequestMessage,
   GetPendingRequestResponse,
-  PersonalDataFieldName,
   SubmitFieldDecisionsMessage,
   SubmitFieldDecisionsResponse,
 } from '../../shared/messages';
 import { normalizeOrigin } from '../../shared/origin';
-import type { PersonalData, ResponseType } from '../../shared/vault-schema';
+import type { PersonalData, PersonalDataFieldName, ResponseType } from '../../shared/vault-schema';
 import { getSessionState } from '../session/state';
 import { getPersonalData } from '../vault/personalData/storage';
 import { readVaultIndex } from '../vault/storage';

@@ -44,6 +44,7 @@ function minimalVaultIndex(overrides: Partial<VaultIndex> = {}): VaultIndex {
     aliasProviderConfig: { provider: 'none' },
     policies: [],
     privacyLedger: [],
+    highTrustOrigins: [],
     ...overrides,
   };
 }
@@ -205,8 +206,9 @@ describe('vault storage', () => {
             origin: 'https://example.com',
             at: 1,
             requestedFields: [],
-            disclosedFields: [],
+            disclosedFields: {},
             deniedFields: [],
+            authorizationMethod: null,
           },
         ],
       }));
@@ -236,7 +238,10 @@ describe('vault storage', () => {
       await Promise.all([
         updateVaultIndex((draft) => ({
           ...draft,
-          policies: [...draft.policies, { fieldSensitivity: 'public', defaultResponse: 'real' }],
+          policies: [
+            ...draft.policies,
+            { scope: { kind: 'global' }, fieldType: 'email', action: 'real' },
+          ],
         })),
         updateVaultIndex((draft) => ({
           ...draft,
@@ -246,8 +251,9 @@ describe('vault storage', () => {
               origin: 'https://example.com',
               at: 1,
               requestedFields: [],
-              disclosedFields: [],
+              disclosedFields: {},
               deniedFields: [],
+              authorizationMethod: null,
             },
           ],
         })),

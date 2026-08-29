@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest';
 import {
   AliasRecordSchema,
   CredentialRecordSchema,
+  PERSONAL_DATA_FIELD_DEFAULT_ACTION,
+  PolicyRuleSchema,
+  PrivacyLedgerEntrySchema,
   ServiceIdentityMetaSchema,
   SitePayloadSchema,
   VaultIndexSchema,
@@ -15,6 +18,7 @@ describe('VaultIndexSchema', () => {
     aliasProviderConfig: { provider: 'none' },
     policies: [],
     privacyLedger: [],
+    highTrustOrigins: [],
   };
 
   it('accepts an all-defaults minimal tree', () => {
@@ -266,5 +270,117 @@ describe('ServiceIdentityMetaSchema', () => {
       payloadStorageKey: 'fixture-payload-storage-key',
     });
     expect(result.success).toBe(true);
+  });
+});
+
+describe('PolicyRuleSchema', () => {
+  it('accepts a global rule', () => {
+    const result = PolicyRuleSchema.safeParse({
+      scope: { kind: 'global' },
+      fieldType: 'phone',
+      action: 'deny',
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('accepts an origin-scoped rule', () => {
+    const result = PolicyRuleSchema.safeParse({
+      scope: { kind: 'origin', origin: 'https://shop.example' },
+      fieldType: 'address',
+      action: 'real',
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('accepts "ask" as an action, distinct from the five ResponseTypes', () => {
+    const result = PolicyRuleSchema.safeParse({
+      scope: { kind: 'global' },
+      fieldType: 'nationalId',
+      action: 'ask',
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects a fieldType outside PersonalDataSchema's six fields", () => {
+    const result = PolicyRuleSchema.safeParse({
+      scope: { kind: 'global' },
+      fieldType: 'username',
+      action: 'deny',
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects an origin-scoped rule missing its origin', () => {
+    const result = PolicyRuleSchema.safeParse({
+      scope: { kind: 'origin' },
+      fieldType: 'email',
+      action: 'alias',
+    });
+    expect(result.success).toBe(false);
+  });
+});
+
+describe('PrivacyLedgerEntrySchema', () => {
+  it('round-trips a mixed disclosed/denied entry with a partial disclosedFields map', () => {
+    const entry = {
+      origin: 'https://example.com',
+      at: Date.now(),
+      requestedFields: ['email', 'phone', 'nationalId'],
+      disclosedFields: { email: 'alias' as const, phone: 'real' as const },
+      deniedFields: ['nationalId'],
+      authorizationMethod: null,
+    };
+    const result = PrivacyLedgerEntrySchema.safeParse(entry);
+    expect(result.success).toBe(true);
+  });
+
+  it('accepts disclosedFields covering none, some, or all six fields', () => {
+    expect(
+      PrivacyLedgerEntrySchema.safeParse({
+        origin: 'https://example.com',
+        at: 1,
+        requestedFields: [],
+        disclosedFields: {},
+        deniedFields: [],
+        authorizationMethod: null,
+      }).success,
+    ).toBe(true);
+  });
+
+  it('rejects a requestedFields entry outside the six known field names', () => {
+    const result = PrivacyLedgerEntrySchema.safeParse({
+      origin: 'https://example.com',
+      at: 1,
+      requestedFields: ['username'],
+      disclosedFields: {},
+      deniedFields: [],
+      authorizationMethod: null,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("accepts a non-null authorizationMethod (Phase 5's eventual use)", () => {
+    const result = PrivacyLedgerEntrySchema.safeParse({
+      origin: 'https://example.com',
+      at: 1,
+      requestedFields: [],
+      disclosedFields: {},
+      deniedFields: [],
+      authorizationMethod: 'fingerprint',
+    });
+    expect(result.success).toBe(true);
+  });
+});
+
+describe('PERSONAL_DATA_FIELD_DEFAULT_ACTION', () => {
+  it("matches privacy-model.md's own example rules exactly", () => {
+    expect(PERSONAL_DATA_FIELD_DEFAULT_ACTION).toEqual({
+      email: 'ask',
+      name: 'ask',
+      phone: 'deny',
+      nationalId: 'ask',
+      address: 'ask',
+      birthDate: 'ask',
+    });
   });
 });

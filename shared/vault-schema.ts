@@ -78,6 +78,25 @@ export const PersonalDataSchema = z.object({
 });
 export type PersonalData = z.infer<typeof PersonalDataSchema>;
 
+// The literal set of PersonalDataSchema's own keys -- kept in exact sync
+// by hand (zod has no built-in "enum of this object schema's keys"
+// helper); PERSONAL_DATA_FIELD_SENSITIVITY/_DEFAULT_ACTION below are both
+// Record<keyof PersonalData, ...>, so a drift here surfaces as a
+// TypeScript error there, not silently. Lives here, not shared/messages.ts
+// (where it originated in Phase 3), so Phase 4's PolicyRuleSchema can
+// reference it without shared/messages.ts <-> shared/vault-schema.ts
+// becoming a circular import -- moved up to this, its natural home
+// alongside the schema it enumerates, once a second file needed it.
+export const PersonalDataFieldNameSchema = z.enum([
+  'name',
+  'email',
+  'phone',
+  'nationalId',
+  'address',
+  'birthDate',
+]);
+export type PersonalDataFieldName = z.infer<typeof PersonalDataFieldNameSchema>;
+
 // A static field->sensitivity map mirroring data-model.md's own table --
 // data, not Policy Engine behavior (that stays Phase 4's), so it belongs
 // here alongside the schema it classifies.
@@ -88,6 +107,35 @@ export const PERSONAL_DATA_FIELD_SENSITIVITY: Record<keyof PersonalData, Sensiti
   nationalId: 'highlySensitive',
   address: 'sensitive',
   birthDate: 'sensitive',
+};
+
+// --- Policy actions (Phase 4) ---
+// A policy needs to express more than the five ResponseTypes: Sensitive/
+// Highly-sensitive fields are meant to keep prompting even under a
+// "policy" (browser-architecture.md's own pipeline: "the user is only
+// prompted for fields the Policy Engine didn't already have a rule for,
+// OR that are flagged sensitive/highly sensitive") -- their own default
+// policy action IS "ask", not a sixth kind of disclosed value. 'ask' is
+// therefore a PolicyAction, never a ResponseType.
+export const PolicyActionSchema = z.union([ResponseTypeSchema, z.literal('ask')]);
+export type PolicyAction = z.infer<typeof PolicyActionSchema>;
+
+// Baseline used when no PolicyRule (Phase 4) matches a field -- lifted
+// directly from privacy-model.md's own example rules ("email -> alias by
+// default", "phone -> deny", "CPF -> always ask", "name -> ask",
+// "address -> always ask"), not invented. birthDate isn't in that example
+// list; defaulted to 'ask', matching the Sensitive tier's general default
+// -- a documented fill of a real gap in the source doc, not a silent
+// guess. email's 'ask' here is the no-alias-provider-configured case;
+// background/policy/resolve.ts substitutes 'alias' once one is configured,
+// mirroring responseAvailability.ts's own alias-gating logic exactly.
+export const PERSONAL_DATA_FIELD_DEFAULT_ACTION: Record<PersonalDataFieldName, PolicyAction> = {
+  email: 'ask',
+  name: 'ask',
+  phone: 'deny',
+  nationalId: 'ask',
+  address: 'ask',
+  birthDate: 'ask',
 };
 
 // --- Credentials ---
@@ -201,21 +249,50 @@ export const ServiceIdentityMetaSchema = z.object({
 export type ServiceIdentityMeta = z.infer<typeof ServiceIdentityMetaSchema>;
 
 // --- Policies / PrivacyLedger ---
-// Schema-only in Phase 2 -- Phase 4 owns the engine that reads/writes
-// these meaningfully (docs/plans/phase-2-local-identity-vault.md's scope
-// boundary table).
+// Shaped schema-only in Phase 2; Phase 4 (docs/plans/
+// phase-4-privacy-ledger-policy-engine.md) is the first to construct,
+// read, or test against either type (confirmed by grep before this
+// change), so both were free to reshape rather than migrate. The
+// original {fieldSensitivity, defaultResponse: ResponseType} shape didn't
+// match privacy-model.md's own Policy Engine table -- it gives DIFFERENT
+// defaults to two fields of the SAME sensitivity tier (name -> Ask,
+// phone -> Deny, both "Sensitive"), so a rule keyed by sensitivity level
+// alone can't represent it. Rules are now keyed by field type and
+// optionally scoped to one origin.
+export const PolicyScopeSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('global') }),
+  z.object({ kind: z.literal('origin'), origin: z.string() }),
+]);
+export type PolicyScope = z.infer<typeof PolicyScopeSchema>;
+
 export const PolicyRuleSchema = z.object({
-  fieldSensitivity: SensitivityLevelSchema,
-  defaultResponse: ResponseTypeSchema,
+  scope: PolicyScopeSchema,
+  fieldType: PersonalDataFieldNameSchema,
+  action: PolicyActionSchema,
 });
 export type PolicyRule = z.infer<typeof PolicyRuleSchema>;
 
+// disclosedFields records WHICH PolicyAction was actually used per field
+// (privacy-model.md's own example ledger entry: "Email -> alias",
+// "Name -> real") -- a bare field-name list can't answer that. 'deny'/
+// 'ask'-that-resolved-to-nothing-disclosed fields belong in deniedFields
+// instead, never both.
 export const PrivacyLedgerEntrySchema = z.object({
   origin: z.string(),
   at: z.number(),
-  requestedFields: z.array(z.string()),
-  disclosedFields: z.array(z.string()),
-  deniedFields: z.array(z.string()),
+  requestedFields: z.array(PersonalDataFieldNameSchema),
+  // z.partialRecord, not z.record -- with an enum key schema, z.record
+  // infers a COMPLETE Record requiring every key present (confirmed
+  // empirically: z.infer rejected a disclosedFields object missing any of
+  // the six field names). A single disclosure will usually only ever
+  // touch a few fields.
+  disclosedFields: z.partialRecord(PersonalDataFieldNameSchema, ResponseTypeSchema),
+  deniedFields: z.array(PersonalDataFieldNameSchema),
+  // Always null until Phase 5 wires biometric authorization -- shaped now
+  // for the same reason Phase 2 shaped Policies/PrivacyLedger themselves
+  // ahead of this phase: privacy-model.md's own example entry already
+  // shows "Authorization: Fingerprint".
+  authorizationMethod: z.string().nullable(),
 });
 export type PrivacyLedgerEntry = z.infer<typeof PrivacyLedgerEntrySchema>;
 
@@ -238,6 +315,15 @@ export const VaultIndexSchema = z.object({
   aliasProviderConfig: AliasProviderConfigSchema,
   policies: z.array(PolicyRuleSchema),
   privacyLedger: z.array(PrivacyLedgerEntrySchema),
+  // Government/financial safe mode (Phase 4) -- a user-maintained list,
+  // not automatic domain/TLS/community-list detection (privacy-model.md
+  // mentions that as one option among several; it needs an external data
+  // source this project doesn't have and, per ADR-001/ADR-007, shouldn't
+  // depend on). A high-trust origin's policy resolution always returns
+  // 'ask' for every field regardless of any stored PolicyRule -- its own
+  // array rather than folded into PolicyRule, since "always ask
+  // regardless of field type" doesn't fit a per-field-type rule shape.
+  highTrustOrigins: z.array(z.string()),
 });
 export type VaultIndex = z.infer<typeof VaultIndexSchema>;
 

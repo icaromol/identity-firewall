@@ -28,6 +28,7 @@ function minimalVaultIndex(): VaultIndex {
     aliasProviderConfig: { provider: 'none' },
     policies: [],
     privacyLedger: [],
+    highTrustOrigins: [],
   };
 }
 

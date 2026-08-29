@@ -112,6 +112,7 @@ export function createRootIdentity(unlockInput: UnlockInput): Promise<void> {
     aliasProviderConfig: { provider: 'none' },
     policies: [],
     privacyLedger: [],
+    highTrustOrigins: [],
   };
   return persistNewVault(index, unlockInput);
 }
