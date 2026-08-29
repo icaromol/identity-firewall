@@ -371,12 +371,22 @@ Retrofitted by the vault storage tiering refactor — see [ADR-015](../adr/ADR-0
 
 Mirrors Phase 1's M7 exactly, but exercising Phase 2's crypto instead of session storage — run against the real production build, in real Chrome, with a real platform authenticator:
 
-- [ ] Setup with a real PRF-capable passkey succeeds; the popup shows "unlocked."
-- [ ] Locking, then terminating the service worker (`chrome://serviceworker-internals/`, same technique Phase 1's M7 validated), then reopening the popup shows "locked" — not "uninitialized" and not a crash — proving the persistent encrypted blob (`vaultBlobExists()`) and the unlock-key cache (session-only, correctly cleared by the restart) are tracked separately as designed.
-- [ ] Unlocking again with the same passkey decrypts the same `PersonalData`/Service Identities set up earlier.
-- [ ] Setting up a second profile with a passphrase-only fallback (no PRF) succeeds and unlocks correctly — proving the fallback path isn't just unit-tested fiction.
-- [ ] Export a backup, then restore it into a fresh profile with a *new* unlock method — the restored profile's `GET_SERVICE_IDENTITY` for a known origin returns the identical key as the original profile.
-- [ ] Every "Data" and "Recovery" question in [`threat-model.md`](../threat-model.md)'s security-review checklist has a concrete, stated answer for this phase's design specifically (this is also the Phase-3 gate below — doing it here first is the actual work; the gate just confirms it happened).
+- [x] Setup with a real PRF-capable passkey succeeds; the popup shows "unlocked."
+- [x] Locking, then terminating the service worker (`chrome://serviceworker-internals/`, same technique Phase 1's M7 validated), then reopening the popup shows "locked" — not "uninitialized" and not a crash — proving the persistent encrypted vault index (`vaultIndexExists()`) and the unlock-key cache (session-only, correctly cleared by the restart) are tracked separately as designed.
+- [x] Unlocking again with the same passkey decrypts the same `PersonalData`/Service Identities set up earlier.
+- [x] Setting up a second profile with a passphrase-only fallback (no PRF) succeeds and unlocks correctly — proving the fallback path isn't just unit-tested fiction.
+- [x] Export a backup, then restore it into a fresh profile with a *new* unlock method — the restored profile's `GET_SERVICE_IDENTITY` for a known origin returns the identical key as the original profile.
+- [x] Every "Data" and "Recovery" question in [`threat-model.md`](../threat-model.md)'s security-review checklist has a concrete, stated answer for this phase's design specifically (this is also the Phase-3 gate below — doing it here first is the actual work; the gate just confirms it happened).
+
+#### M9 — Implementation (as built)
+
+Run manually against the real production build, in real Chrome, with a real Windows Hello platform authenticator (not simulated — WebAuthn PRF can't be scripted in Playwright, which is exactly why this milestone stays manual):
+
+- **Passkey setup + real restart survival**: setup with a real passkey succeeded ("Vault unlocked."). Locking, then stopping the service worker via `chrome://serviceworker-internals/`, then reopening the popup (a fresh mount, not the stale already-open one — MV3 popups only refetch state on a new open) correctly showed "Vault is locked." — not "uninitialized," no crash. This is actually the stronger form of the check: no explicit Lock click preceded the restart, so this proves the in-memory unlock-key cache doesn't survive a genuine service-worker restart on its own, not merely that an explicit Lock works.
+- **Re-unlock**: unlocking again with the same passkey succeeded ("Vault unlocked.").
+- **Second profile, passphrase-only**: a separate Chrome profile, loaded with the same unpacked build, set up via the passphrase field (not the passkey button) and unlocked correctly — creating its own Service Identity for `https://example.com` produced a completely independent `identifierB64`, as expected for an unrelated root identity.
+- **Backup/restore round-trip**: from the original passkey profile, created a Service Identity for `https://example.com` (`identifierB64 = 1DY3BB4gJiP31ZM8yqcwFYEoq7zhh8XhOSEIccGPPb8=`, via `CREATE_SERVICE_IDENTITY` — no UI yet, Phase 3's job), exported a backup under a chosen backup passphrase, then restored it into a third profile with a *different* unlock method than the original. `GET_SERVICE_IDENTITY` for the same origin in the restored profile returned the **identical** `identifierB64`, while `payloadStorageKey` came back as a freshly-generated UUID — exactly ADR-015's design: the identity is preserved, storage keys are always regenerated fresh on restore, never meaningful across devices.
+- **Threat-model checklist**: see the updated "Gate to start Phase 3" table below, rewritten to describe the current three-tier vault (the previous table described the pre-ADR-015 single-blob design and was stale).
 
 ---
 
@@ -443,20 +453,54 @@ Only move on to Phase 3 once every "Data" and "Recovery" question in [`threat-mo
 
 ```text
 DATA
- - Where does the data live?            -> browser.storage.local, one encrypted blob
- - Is it encrypted?                     -> AES-256-GCM, whole-blob, 12-byte random IV
- - Who holds the keys?                  -> the user, via PRF or passphrase; never persisted as itself
- - What leaves the device?              -> nothing, until Phase 3 exists
+ - Where does the data live?             -> browser.storage.local, split into three independently-
+                                             encrypted tiers: the vault index (if_vault_index_v1),
+                                             the personal-data blob (if_vault_personal_data_v1), and
+                                             one per-site payload blob per origin
+                                             (if_vault_site_<payloadStorageKey>_v1, payloadStorageKey
+                                             a random UUID never derived from the origin)
+ - Is it encrypted?                      -> AES-256-GCM per tier, each with its own random 12-byte
+                                             IV and its own independently-derived key -- decrypting
+                                             one tier (e.g. one site's credentials) never requires or
+                                             exposes the other two
+ - Who holds the keys?                   -> the user, exclusively. VaultUnlockKey comes from a
+                                             WebAuthn PRF output (primary) or Argon2id over a
+                                             passphrase (fallback); RootSecret and every per-tier key
+                                             are derived from it via HKDF-SHA256 with domain-separated
+                                             info strings (ADR-010, ADR-015). No key material is ever
+                                             persisted in plaintext or leaves the device -- there is
+                                             no server to hand it to.
+ - What leaves the device?               -> nothing, by default. The only device-crossing artifact
+                                             is a user-initiated backup file (M7), itself AES-GCM-
+                                             encrypted under a user-chosen backup passphrase -- it
+                                             leaves the device only when the user explicitly downloads
+                                             it, and stays under the user's own custody.
 
 RECOVERY
- - What happens if the device is lost?  -> backup export/restore (M7), or total loss without a backup
- - Does a backup exist?                 -> yes, user-triggered, Argon2id-encrypted
- - Who can recover the identity/vault?  -> whoever holds the backup file AND its passphrase
- - Does the backup contain private keys? -> yes (the whole VaultData, including RootSecret) --
-                                            say this plainly, don't gloss over it
+ - What happens if the device is lost?   -> without a backup, the vault is unrecoverable -- stated
+                                             plainly, no other claim made. With a backup, restore
+                                             reconstructs an equivalent vault on a new device/profile
+                                             (verified live in M9: identical Service Identity
+                                             identifierB64 recovered under a newly-chosen unlock
+                                             method).
+ - Does a backup exist?                  -> yes, user-triggered only, never automatic and never
+                                             uploaded anywhere by the extension itself -- it bundles
+                                             the index tier, personal-data tier, and every site's
+                                             payload (keyed by origin, not the original device's
+                                             meaningless-elsewhere payloadStorageKey) into one
+                                             Argon2id/AES-GCM-encrypted downloadable file.
+ - Who can recover the identity/vault?   -> whoever holds both the backup file and the backup
+                                             passphrase chosen at export time -- nobody else; there
+                                             is no server-side copy or escrow of any kind.
+ - Does the backup contain private keys? -> yes, once decrypted -- say this plainly. RootSecret and
+                                             everything derived from it (every Service Identity's
+                                             Ed25519 seed, every credential, every alias) is
+                                             reconstituted from the backup. Its confidentiality rests
+                                             entirely on the strength of the backup passphrase chosen;
+                                             Argon2id makes brute-forcing expensive, not unnecessary.
 ```
 
-plus one concrete, hands-on proof (M9) that a real service-worker restart never exposes plaintext and never silently loses initialization state (`vaultBlobExists()`) — the Phase 2 equivalent of Phase 1's M7 "terminate the service worker and reopen the popup" centerpiece test.
+Verified live in M9: a real service-worker restart never exposes plaintext and never silently loses initialization state (`vaultIndexExists()`) — the Phase 2 equivalent of Phase 1's M7 "terminate the service worker and reopen the popup" centerpiece test.
 
 ---
 
