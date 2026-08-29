@@ -108,6 +108,7 @@ export async function handleGetPendingRequest(
       policyContext.aliasProviderConfigured,
     ),
     resolvedActions: computeResolvedActions(message.payload.origin, record.forms, policyContext),
+    isHighTrustOrigin: policyContext.isHighTrustOrigin(message.payload.origin),
   };
 }
 

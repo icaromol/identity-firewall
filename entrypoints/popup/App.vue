@@ -171,6 +171,26 @@ function submitRestoreWithPassphrase() {
         Pending request{{ firewall.origin ? ` — ${firewall.origin}` : '' }}
       </h2>
 
+      <!-- Government/financial safe mode (Phase 4 M6) -- a standing
+           per-site setting, shown whenever the origin is known regardless
+           of whether a request happens to be pending right now. -->
+      <label
+        v-if="firewall.origin"
+        class="mt-2 flex items-center gap-2 text-xs text-neutral-400"
+      >
+        <input
+          type="checkbox"
+          :checked="firewall.isHighTrustOrigin"
+          @change="firewall.toggleHighTrust()"
+        />
+        Treat this site as government/financial (always ask, ignore policies)
+      </label>
+
+      <p v-if="firewall.isHighTrustOrigin" class="mt-2 text-amber-400">
+        ⚠️ This site has been identified as a government/financial service. Automatic identity
+        autofill has been disabled.
+      </p>
+
       <p
         v-if="firewall.status === 'idle' || firewall.status === 'loading'"
         class="mt-2 text-neutral-400"

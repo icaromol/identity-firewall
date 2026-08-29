@@ -367,6 +367,12 @@ export interface PendingRequest {
   // decisions -- that's the whole point of "only asks what falls outside
   // the rules."
   resolvedActions: Partial<Record<PersonalDataFieldName, PolicyAction>>;
+  // Phase 4 M6 -- government/financial safe mode. True when the user has
+  // marked this exact origin high-trust; the popup uses this to show the
+  // "safe mode" warning banner, and it's also the reason every field
+  // above resolved to 'ask' regardless of any stored policy rule (see
+  // resolvePolicy's own safe-mode-first ordering).
+  isHighTrustOrigin: boolean;
 }
 export type GetPendingRequestResponse = PendingRequest | null;
 

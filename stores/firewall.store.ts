@@ -25,6 +25,8 @@ import type {
   GetPendingRequestMessage,
   MessageResponse,
   PendingRequest,
+  SetHighTrustOriginMessage,
+  SetHighTrustOriginResponse,
   SubmitFieldDecisionsMessage,
   SubmitFieldDecisionsResponse,
 } from '../shared/messages';
@@ -43,6 +45,8 @@ export interface FirewallStoreState {
   // server-side by background/firewall/handler.ts's handleGetPendingRequest
   // using the exact same resolvePolicy logic the automatic path uses.
   resolvedActions: Partial<Record<PersonalDataFieldName, PolicyAction>>;
+  // Phase 4 M6 -- government/financial safe mode for THIS origin.
+  isHighTrustOrigin: boolean;
   decisions: Record<string, ResponseType>; // keyed by compoundKey()
   status: 'idle' | 'loading' | 'loaded' | 'error';
   error: string | null;
@@ -61,6 +65,7 @@ export const useFirewallStore = defineStore('firewall', {
     forms: [],
     availableResponses: {},
     resolvedActions: {},
+    isHighTrustOrigin: false,
     decisions: {},
     status: 'idle',
     error: null,
@@ -94,6 +99,7 @@ export const useFirewallStore = defineStore('firewall', {
           this.forms = response.data?.forms ?? [];
           this.availableResponses = response.data?.availableResponses ?? {};
           this.resolvedActions = response.data?.resolvedActions ?? {};
+          this.isHighTrustOrigin = response.data?.isHighTrustOrigin ?? false;
           this.decisions = {};
           // Pre-fill every field whose Policy Engine resolution is
           // anything but 'ask' -- "only asks what falls outside the
@@ -118,6 +124,23 @@ export const useFirewallStore = defineStore('firewall', {
         this.error = err instanceof Error ? err.message : String(err);
         this.status = 'error';
       }
+    },
+
+    // Government/financial safe mode (Phase 4 M6) -- marks/unmarks THIS
+    // origin high-trust, then re-fetches so resolvedActions/decisions
+    // reflect the new safe-mode state immediately (a high-trust origin
+    // always resolves every field to 'ask', overriding any stored
+    // policy -- see resolvePolicy's own safe-mode-first ordering).
+    async toggleHighTrust(): Promise<void> {
+      if (this.origin === null) return;
+
+      const message: SetHighTrustOriginMessage = {
+        type: 'SET_HIGH_TRUST_ORIGIN',
+        payload: { origin: this.origin, isHighTrust: !this.isHighTrustOrigin },
+      };
+      const response: MessageResponse<SetHighTrustOriginResponse> =
+        await browser.runtime.sendMessage(message);
+      if (response.ok) await this.fetchPendingRequest();
     },
 
     getDecision(formIndex: number, fieldKey: string): ResponseType | undefined {

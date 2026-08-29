@@ -57,6 +57,10 @@ describe('useFirewallStore', () => {
   beforeEach(() => {
     fakeBrowser.reset();
     setActivePinia(createPinia());
+    // vi.spyOn on an already-mocked method doesn't reset its call history
+    // on its own -- needed for the 'not.toHaveBeenCalled()' assertion
+    // below to reflect only calls made within its own test.
+    vi.restoreAllMocks();
   });
 
   it('derives origin/tabId from the active tab and loads forms + availableResponses', async () => {
@@ -239,5 +243,56 @@ describe('useFirewallStore', () => {
 
     expect(store.submitErrors[0]).toBe('form 0 failed');
     expect(store.submitErrors[1]).toBeUndefined();
+  });
+
+  it('loads isHighTrustOrigin from the response', async () => {
+    mockActiveTab();
+    vi.spyOn(fakeBrowser.runtime, 'sendMessage').mockResolvedValueOnce({
+      ok: true,
+      data: { forms: [], availableResponses: {}, isHighTrustOrigin: true },
+    } as never);
+
+    const store = useFirewallStore();
+    await store.fetchPendingRequest();
+
+    expect(store.isHighTrustOrigin).toBe(true);
+  });
+
+  it('toggleHighTrust sends SET_HIGH_TRUST_ORIGIN with the flipped value and re-fetches', async () => {
+    mockActiveTab();
+    vi.spyOn(fakeBrowser.runtime, 'sendMessage').mockResolvedValueOnce({
+      ok: true,
+      data: { forms: [], availableResponses: {}, isHighTrustOrigin: false },
+    } as never);
+
+    const store = useFirewallStore();
+    await store.fetchPendingRequest();
+    expect(store.isHighTrustOrigin).toBe(false);
+
+    const setSpy = vi
+      .spyOn(fakeBrowser.runtime, 'sendMessage')
+      .mockResolvedValueOnce({ ok: true, data: ['https://example.com'] } as never);
+    mockActiveTab();
+    vi.spyOn(fakeBrowser.runtime, 'sendMessage').mockResolvedValueOnce({
+      ok: true,
+      data: { forms: [], availableResponses: {}, isHighTrustOrigin: true },
+    } as never);
+
+    await store.toggleHighTrust();
+
+    expect(setSpy).toHaveBeenCalledWith({
+      type: 'SET_HIGH_TRUST_ORIGIN',
+      payload: { origin: 'https://example.com', isHighTrust: true },
+    });
+    expect(store.isHighTrustOrigin).toBe(true);
+  });
+
+  it('toggleHighTrust does nothing when the origin is not yet known', async () => {
+    const store = useFirewallStore();
+    const sendMessageSpy = vi.spyOn(fakeBrowser.runtime, 'sendMessage');
+
+    await store.toggleHighTrust();
+
+    expect(sendMessageSpy).not.toHaveBeenCalled();
   });
 });

@@ -5,6 +5,7 @@ import {
   handleSubmitFieldDecisions,
 } from '../../../../background/firewall/handler';
 import { handleFormDetected } from '../../../../background/formDetection/handler';
+import { setHighTrustOrigin, setPolicy } from '../../../../background/policy/storage';
 import { setPersonalData } from '../../../../background/vault/personalData/storage';
 import { createRootIdentity } from '../../../../background/vault/setup';
 import { readVaultIndex } from '../../../../background/vault/storage';
@@ -117,6 +118,32 @@ describe('handleGetPendingRequest', () => {
       payload: { origin: 'https://nothing-here.example' },
     };
     expect(await handleGetPendingRequest(message)).toBeNull();
+  });
+
+  it('reports isHighTrustOrigin and forces "ask" for a field even with a matching real policy', async () => {
+    await detectEmailForm('https://gov.example');
+    await setPersonalData({ email: 'user@example.com' });
+    await setPolicy({ scope: { kind: 'global' }, fieldType: 'email', action: 'real' });
+    await setHighTrustOrigin('https://gov.example', true);
+
+    const result = await handleGetPendingRequest({
+      type: 'GET_PENDING_REQUEST',
+      payload: { origin: 'https://gov.example' },
+    });
+
+    expect(result?.isHighTrustOrigin).toBe(true);
+    expect(result?.resolvedActions.email).toBe('ask');
+  });
+
+  it('reports isHighTrustOrigin: false for an ordinary origin', async () => {
+    await detectEmailForm('https://example.com');
+
+    const result = await handleGetPendingRequest({
+      type: 'GET_PENDING_REQUEST',
+      payload: { origin: 'https://example.com' },
+    });
+
+    expect(result?.isHighTrustOrigin).toBe(false);
   });
 });
 
