@@ -13,6 +13,12 @@ import type { ExtensionMessage } from '../../shared/messages';
 import { handleGetPendingRequest, handleSubmitFieldDecisions } from '../firewall/handler';
 import { handleFormDetected } from '../formDetection/handler';
 import { handleCreateServiceIdentity, handleGetServiceIdentity } from '../identity/handler';
+import {
+  handleDeletePolicy,
+  handleGetPolicies,
+  handleSetHighTrustOrigin,
+  handleSetPolicy,
+} from '../policy/handler';
 import { handleGetOriginState, handleGetSessionState } from '../session/handler';
 import {
   handleDeleteCredential,
@@ -29,7 +35,7 @@ import {
 } from '../vault/handler';
 import { handleGetPersonalData, handleSetPersonalData } from '../vault/personalData/handler';
 
-export type Capability = 'formDetection' | 'session' | 'vault' | 'identity' | 'firewall';
+export type Capability = 'formDetection' | 'session' | 'vault' | 'identity' | 'firewall' | 'policy';
 
 export interface HandlerContext {
   sender: Browser.runtime.MessageSender;
@@ -122,5 +128,21 @@ export const registry: Registry = {
   RESTORE_VAULT_BACKUP: {
     capability: 'vault',
     handle: (message) => handleRestoreVaultBackup(message),
+  },
+  GET_POLICIES: {
+    capability: 'policy',
+    handle: (message) => handleGetPolicies(message),
+  },
+  SET_POLICY: {
+    capability: 'policy',
+    handle: (message) => handleSetPolicy(message),
+  },
+  DELETE_POLICY: {
+    capability: 'policy',
+    handle: (message) => handleDeletePolicy(message),
+  },
+  SET_HIGH_TRUST_ORIGIN: {
+    capability: 'policy',
+    handle: (message) => handleSetHighTrustOrigin(message),
   },
 };

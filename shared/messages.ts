@@ -15,6 +15,7 @@ import type {
   CredentialRecord,
   PersonalData,
   PersonalDataFieldName,
+  PolicyRule,
   ResponseType,
   ServiceIdentityMeta,
 } from './vault-schema';
@@ -23,6 +24,8 @@ import {
   CredentialRecordSchema,
   PersonalDataFieldNameSchema,
   PersonalDataSchema,
+  PolicyRuleSchema,
+  PolicyScopeSchema,
   ResponseTypeSchema,
   SensitivityLevelSchema,
 } from './vault-schema';
@@ -137,6 +140,34 @@ export const AutofillFieldsMessageSchema = z.object({
   }),
 });
 export type AutofillFieldsMessage = z.infer<typeof AutofillFieldsMessageSchema>;
+
+// --- Popup -> Background: Policy Engine (Phase 4) ---
+export const GetPoliciesMessageSchema = z.object({
+  type: z.literal('GET_POLICIES'),
+  payload: z.object({}).optional(),
+});
+export type GetPoliciesMessage = z.infer<typeof GetPoliciesMessageSchema>;
+
+// Upsert by (scope, fieldType) -- background/policy/storage.ts's setPolicy
+// replaces any existing rule occupying that same slot rather than
+// appending a duplicate.
+export const SetPolicyMessageSchema = z.object({
+  type: z.literal('SET_POLICY'),
+  payload: PolicyRuleSchema,
+});
+export type SetPolicyMessage = z.infer<typeof SetPolicyMessageSchema>;
+
+export const DeletePolicyMessageSchema = z.object({
+  type: z.literal('DELETE_POLICY'),
+  payload: z.object({ scope: PolicyScopeSchema, fieldType: PersonalDataFieldNameSchema }),
+});
+export type DeletePolicyMessage = z.infer<typeof DeletePolicyMessageSchema>;
+
+export const SetHighTrustOriginMessageSchema = z.object({
+  type: z.literal('SET_HIGH_TRUST_ORIGIN'),
+  payload: z.object({ origin: z.string(), isHighTrust: z.boolean() }),
+});
+export type SetHighTrustOriginMessage = z.infer<typeof SetHighTrustOriginMessageSchema>;
 
 // --- Popup -> Background: vault unlock (shared by CREATE_ROOT_IDENTITY
 // and VAULT_UNLOCK -- setting up the vault and unlocking it later both
@@ -267,6 +298,10 @@ export const ExtensionMessageSchema = z.discriminatedUnion('type', [
   GetPendingRequestMessageSchema,
   SubmitFieldDecisionsMessageSchema,
   AutofillFieldsMessageSchema,
+  GetPoliciesMessageSchema,
+  SetPolicyMessageSchema,
+  DeletePolicyMessageSchema,
+  SetHighTrustOriginMessageSchema,
   VaultStatusMessageSchema,
   CreateRootIdentityMessageSchema,
   VaultUnlockMessageSchema,
@@ -324,6 +359,19 @@ export type GetPendingRequestResponse = PendingRequest | null;
 export interface SubmitFieldDecisionsResponse {
   resolvedValues: Record<string, string>;
 }
+
+// GET_POLICIES/SET_POLICY/DELETE_POLICY's response payload shapes
+// (background/policy/handler.ts) -- all three return the full, current
+// policies array rather than just the one rule touched, so the popup
+// never needs a second round trip to refresh its own list after a write.
+export type GetPoliciesResponse = PolicyRule[];
+export type SetPolicyResponse = PolicyRule[];
+export type DeletePolicyResponse = PolicyRule[];
+
+// SET_HIGH_TRUST_ORIGIN's response payload shape -- the full, current
+// list, same "avoid a second round trip" convention as the policy
+// responses above.
+export type SetHighTrustOriginResponse = string[];
 
 // VAULT_STATUS's response payload shape (background/vault/handler.ts's
 // handleVaultStatus), named once for the same reason as OriginSummary above.
