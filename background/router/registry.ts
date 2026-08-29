@@ -16,6 +16,7 @@ import { handleCreateServiceIdentity, handleGetServiceIdentity } from '../identi
 import {
   handleDeletePolicy,
   handleGetPolicies,
+  handleGetPrivacyLedger,
   handleSetHighTrustOrigin,
   handleSetPolicy,
 } from '../policy/handler';
@@ -144,5 +145,9 @@ export const registry: Registry = {
   SET_HIGH_TRUST_ORIGIN: {
     capability: 'policy',
     handle: (message) => handleSetHighTrustOrigin(message),
+  },
+  GET_PRIVACY_LEDGER: {
+    capability: 'policy',
+    handle: (message) => handleGetPrivacyLedger(message),
   },
 };

@@ -3,18 +3,53 @@
 // stores/session.store.ts. M4 adds the Vault section's three real states
 // (setup/locked/unlocked), backed by stores/vault.store.ts. Phase 3 M4/M5
 // add the "Pending request" section below, backed by
-// stores/firewall.store.ts -- the Identity Firewall's approval UI.
-import { onMounted, ref } from 'vue';
+// stores/firewall.store.ts -- the Identity Firewall's approval UI. Phase 4
+// M5 adds "What this site knows about you", backed by
+// stores/privacyLedger.store.ts.
+import { computed, onMounted, ref } from 'vue';
 import { getFieldKey } from '../../shared/fieldKey';
 import type { ClassifiedField, ClassifiedForm } from '../../shared/messages';
-import type { ResponseType } from '../../shared/vault-schema';
+import type { PersonalDataFieldName, ResponseType } from '../../shared/vault-schema';
 import { useFirewallStore } from '../../stores/firewall.store';
+import { usePrivacyLedgerStore } from '../../stores/privacyLedger.store';
 import { useSessionStore } from '../../stores/session.store';
 import { useVaultStore } from '../../stores/vault.store';
 
 const session = useSessionStore();
 const vault = useVaultStore();
 const firewall = useFirewallStore();
+const privacyLedger = usePrivacyLedgerStore();
+
+// Aggregates every recorded ledger entry for this origin into the
+// per-service summary privacy-model.md's own mockup shows ("Disclosed: ✓
+// Email, ✓ Username / Denied: ✕ Name..."), not the raw per-event list --
+// a field can appear in both a disclosed and a later denied entry (the
+// user changed their mind between visits); the MOST RECENT entry touching
+// that field wins, matching "what does this site currently have," not a
+// full history of every past decision.
+// biome-ignore lint/correctness/noUnusedVariables: read from <template> -- Biome only lints the <script> block, it can't see template usage.
+const ledgerSummary = computed(() => {
+  const disclosed = new Map<PersonalDataFieldName, ResponseType>();
+  const denied = new Set<PersonalDataFieldName>();
+  let lastAccess: number | null = null;
+
+  for (const entry of privacyLedger.entries) {
+    lastAccess = lastAccess === null ? entry.at : Math.max(lastAccess, entry.at);
+    for (const field of entry.deniedFields) {
+      denied.add(field);
+      disclosed.delete(field);
+    }
+    for (const [field, responseType] of Object.entries(entry.disclosedFields) as [
+      PersonalDataFieldName,
+      ResponseType,
+    ][]) {
+      disclosed.set(field, responseType);
+      denied.delete(field);
+    }
+  }
+
+  return { disclosed, denied, lastAccess };
+});
 
 const setupPassphrase = ref('');
 const unlockPassphrase = ref('');
@@ -27,6 +62,7 @@ onMounted(() => {
   session.fetchSessionState();
   vault.fetchStatus();
   firewall.fetchPendingRequest();
+  privacyLedger.fetchLedger();
 });
 
 // Preserves each field's true index within form.fields (needed for
@@ -215,6 +251,43 @@ function submitRestoreWithPassphrase() {
             {{ firewall.submitErrors[form.formIndex] }}
           </p>
         </div>
+      </div>
+    </section>
+
+    <section class="mt-4 border-t border-neutral-800 pt-4">
+      <h2 class="text-xs font-semibold uppercase tracking-wide text-neutral-400">
+        What this site knows about you{{ privacyLedger.origin ? ` — ${privacyLedger.origin}` : '' }}
+      </h2>
+
+      <p
+        v-if="privacyLedger.status === 'idle' || privacyLedger.status === 'loading'"
+        class="mt-2 text-neutral-400"
+      >
+        Loading…
+      </p>
+
+      <p v-else-if="privacyLedger.status === 'error'" class="mt-2 text-red-400">
+        {{ privacyLedger.error }}
+      </p>
+
+      <p
+        v-else-if="ledgerSummary.disclosed.size === 0 && ledgerSummary.denied.size === 0"
+        class="mt-2 text-neutral-400"
+      >
+        No history for this site yet.
+      </p>
+
+      <div v-else class="mt-2 space-y-1">
+        <p v-for="[field, responseType] in ledgerSummary.disclosed" :key="`d-${field}`">
+          <span class="text-green-400">✓</span> {{ field }}
+          <span class="text-neutral-500">({{ responseType }})</span>
+        </p>
+        <p v-for="field in ledgerSummary.denied" :key="`x-${field}`">
+          <span class="text-red-400">✕</span> {{ field }}
+        </p>
+        <p v-if="ledgerSummary.lastAccess" class="mt-2 text-xs text-neutral-500">
+          Last access: {{ new Date(ledgerSummary.lastAccess).toLocaleString() }}
+        </p>
       </div>
     </section>
 

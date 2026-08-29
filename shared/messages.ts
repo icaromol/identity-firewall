@@ -17,6 +17,7 @@ import type {
   PersonalDataFieldName,
   PolicyAction,
   PolicyRule,
+  PrivacyLedgerEntry,
   ResponseType,
   ServiceIdentityMeta,
 } from './vault-schema';
@@ -170,6 +171,15 @@ export const SetHighTrustOriginMessageSchema = z.object({
 });
 export type SetHighTrustOriginMessage = z.infer<typeof SetHighTrustOriginMessageSchema>;
 
+// "What does this site know about me?" (privacy-model.md) -- returns
+// every PrivacyLedgerEntry recorded for one origin, most recent last
+// (append-only, same order recordDisclosure writes them in).
+export const GetPrivacyLedgerMessageSchema = z.object({
+  type: z.literal('GET_PRIVACY_LEDGER'),
+  payload: z.object({ origin: z.string() }),
+});
+export type GetPrivacyLedgerMessage = z.infer<typeof GetPrivacyLedgerMessageSchema>;
+
 // --- Popup -> Background: vault unlock (shared by CREATE_ROOT_IDENTITY
 // and VAULT_UNLOCK -- setting up the vault and unlocking it later both
 // need to prove the same thing, "I hold the unlock factor," per
@@ -303,6 +313,7 @@ export const ExtensionMessageSchema = z.discriminatedUnion('type', [
   SetPolicyMessageSchema,
   DeletePolicyMessageSchema,
   SetHighTrustOriginMessageSchema,
+  GetPrivacyLedgerMessageSchema,
   VaultStatusMessageSchema,
   CreateRootIdentityMessageSchema,
   VaultUnlockMessageSchema,
@@ -381,6 +392,9 @@ export type DeletePolicyResponse = PolicyRule[];
 // list, same "avoid a second round trip" convention as the policy
 // responses above.
 export type SetHighTrustOriginResponse = string[];
+
+// GET_PRIVACY_LEDGER's response payload shape (background/policy/handler.ts).
+export type GetPrivacyLedgerResponse = PrivacyLedgerEntry[];
 
 // VAULT_STATUS's response payload shape (background/vault/handler.ts's
 // handleVaultStatus), named once for the same reason as OriginSummary above.

@@ -3,9 +3,11 @@ import { fakeBrowser } from 'wxt/testing/fake-browser';
 import {
   handleDeletePolicy,
   handleGetPolicies,
+  handleGetPrivacyLedger,
   handleSetHighTrustOrigin,
   handleSetPolicy,
 } from '../../../../background/policy/handler';
+import { recordDisclosure } from '../../../../background/policy/ledger';
 import { createRootIdentity } from '../../../../background/vault/setup';
 import type { UnlockInput } from '../../../../shared/messages';
 
@@ -45,5 +47,26 @@ describe('policy handlers', () => {
       payload: { origin: 'https://gov.example', isHighTrust: true },
     });
     expect(result).toEqual(['https://gov.example']);
+  });
+
+  it('handleGetPrivacyLedger returns only entries for the requested (normalized) origin', async () => {
+    await recordDisclosure('https://Example.com:443', ['email'], { email: 'real' }, []);
+    await recordDisclosure('https://other.example', ['phone'], {}, ['phone']);
+
+    const result = await handleGetPrivacyLedger({
+      type: 'GET_PRIVACY_LEDGER',
+      payload: { origin: 'https://example.com' },
+    });
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({ origin: 'https://example.com', requestedFields: ['email'] });
+  });
+
+  it('handleGetPrivacyLedger returns an empty array for an origin with no history', async () => {
+    const result = await handleGetPrivacyLedger({
+      type: 'GET_PRIVACY_LEDGER',
+      payload: { origin: 'https://nothing-here.example' },
+    });
+    expect(result).toEqual([]);
   });
 });
