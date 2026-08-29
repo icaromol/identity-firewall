@@ -13,11 +13,16 @@
 
 import { browser } from 'wxt/browser';
 import type { CanonicalOrigin } from '../../shared/origin';
+import type { ClassifiedForm } from '../firewall/classifier';
 
 const SESSION_STORAGE_KEY = 'if_session_state_v1';
 
+// forms holds the classified structure (Phase 3), not just a count --
+// formCount is derived from forms.length wherever it's still needed
+// (GET_SESSION_STATE/GET_ORIGIN_STATE's existing response shapes), rather
+// than stored separately and risking the two drifting apart.
 export interface OriginFormRecord {
-  formCount: number;
+  forms: ClassifiedForm[];
   lastDetectedAt: number; // epoch ms
 }
 
@@ -42,12 +47,12 @@ let writeQueue: Promise<void> = Promise.resolve();
 
 export function recordFormDetection(
   origin: CanonicalOrigin,
-  formCount: number,
+  forms: ClassifiedForm[],
   detectedAt: number,
 ): Promise<void> {
   const result = writeQueue.then(async () => {
     const state = await getSessionState();
-    state.originForms[origin] = { formCount, lastDetectedAt: detectedAt };
+    state.originForms[origin] = { forms, lastDetectedAt: detectedAt };
     await browser.storage.session.set({ [SESSION_STORAGE_KEY]: state });
   });
   writeQueue = result.catch(() => {});

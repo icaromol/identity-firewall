@@ -10,6 +10,7 @@
 
 import type { Browser } from 'wxt/browser';
 import type { ExtensionMessage } from '../../shared/messages';
+import { handleGetPendingRequest } from '../firewall/handler';
 import { handleFormDetected } from '../formDetection/handler';
 import { handleCreateServiceIdentity, handleGetServiceIdentity } from '../identity/handler';
 import { handleGetOriginState, handleGetSessionState } from '../session/handler';
@@ -61,6 +62,10 @@ export const registry: Registry = {
   GET_ORIGIN_STATE: {
     capability: 'session',
     handle: (message) => handleGetOriginState(message),
+  },
+  GET_PENDING_REQUEST: {
+    capability: 'firewall',
+    handle: (message) => handleGetPendingRequest(message),
   },
   VAULT_STATUS: {
     capability: 'vault',

@@ -11,22 +11,16 @@
 // no vault data model for it and mis-blocking an arbitrary comment/company/
 // country field would break ordinary site functionality.
 
-import type { DetectedField, DetectedForm } from '../../shared/messages';
-import type { PersonalData, SensitivityLevel } from '../../shared/vault-schema';
+import type {
+  ClassifiedField,
+  ClassifiedForm,
+  DetectedField,
+  DetectedForm,
+} from '../../shared/messages';
+import type { PersonalData } from '../../shared/vault-schema';
 import { PERSONAL_DATA_FIELD_SENSITIVITY } from '../../shared/vault-schema';
 
-export interface ClassifiedField extends DetectedField {
-  fieldType: keyof PersonalData | null;
-  sensitivity: SensitivityLevel | null;
-  apparentlyRequired: boolean;
-}
-
-export interface ClassifiedForm {
-  formIndex: number;
-  action: string | null;
-  method: string | null;
-  fields: ClassifiedField[];
-}
+export type { ClassifiedField, ClassifiedForm };
 
 // Known first/last-name split forms (autocomplete="given-name"/"family-name")
 // both fold onto the single 'name' field, same as PersonalDataSchema itself

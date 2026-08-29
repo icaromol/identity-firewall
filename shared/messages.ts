@@ -12,7 +12,12 @@
 
 import { z } from 'zod';
 import type { CredentialRecord, PersonalData, ServiceIdentityMeta } from './vault-schema';
-import { Argon2ParamsSchema, CredentialRecordSchema, PersonalDataSchema } from './vault-schema';
+import {
+  Argon2ParamsSchema,
+  CredentialRecordSchema,
+  PersonalDataSchema,
+  SensitivityLevelSchema,
+} from './vault-schema';
 
 export const DetectedFieldSchema = z.object({
   tagName: z.enum(['input', 'textarea', 'select']),
@@ -35,6 +40,40 @@ export const DetectedFormSchema = z.object({
   fields: z.array(DetectedFieldSchema),
 });
 export type DetectedForm = z.infer<typeof DetectedFormSchema>;
+
+// The literal set of PersonalDataSchema's own keys -- kept in exact sync
+// with vault-schema.ts's PersonalDataSchema by hand (zod has no built-in
+// "enum of this object schema's keys" helper); PERSONAL_DATA_FIELD_SENSITIVITY
+// in vault-schema.ts is a Record<keyof PersonalData, ...>, so a drift here
+// would surface as a TypeScript error there, not silently.
+export const PersonalDataFieldNameSchema = z.enum([
+  'name',
+  'email',
+  'phone',
+  'nationalId',
+  'address',
+  'birthDate',
+]);
+export type PersonalDataFieldName = z.infer<typeof PersonalDataFieldNameSchema>;
+
+// background/firewall/classifier.ts's output shape (Phase 3) -- lives here,
+// not in that background module, so the message contract (GET_PENDING_REQUEST
+// below) can reference it without background/ importing into shared/ or
+// vice versa, matching how DetectedField/DetectedForm above already work.
+export const ClassifiedFieldSchema = DetectedFieldSchema.extend({
+  fieldType: PersonalDataFieldNameSchema.nullable(),
+  sensitivity: SensitivityLevelSchema.nullable(),
+  apparentlyRequired: z.boolean(),
+});
+export type ClassifiedField = z.infer<typeof ClassifiedFieldSchema>;
+
+export const ClassifiedFormSchema = z.object({
+  formIndex: z.number(),
+  action: z.string().nullable(),
+  method: z.string().nullable(),
+  fields: z.array(ClassifiedFieldSchema),
+});
+export type ClassifiedForm = z.infer<typeof ClassifiedFormSchema>;
 
 // --- Content script -> Background ---
 export const FormDetectedMessageSchema = z.object({
@@ -60,6 +99,17 @@ export const GetOriginStateMessageSchema = z.object({
   payload: z.object({ origin: z.string() }),
 });
 export type GetOriginStateMessage = z.infer<typeof GetOriginStateMessageSchema>;
+
+// --- Popup -> Background: Identity Firewall (Phase 3) ---
+// Deliberately a separate message type from GET_ORIGIN_STATE above rather
+// than overloading it -- GET_ORIGIN_STATE serves the lightweight "sites
+// visited this session" list, this serves the approval UI's full
+// classified-field view, a different purpose with a much richer response.
+export const GetPendingRequestMessageSchema = z.object({
+  type: z.literal('GET_PENDING_REQUEST'),
+  payload: z.object({ origin: z.string() }),
+});
+export type GetPendingRequestMessage = z.infer<typeof GetPendingRequestMessageSchema>;
 
 // --- Popup -> Background: vault unlock (shared by CREATE_ROOT_IDENTITY
 // and VAULT_UNLOCK -- setting up the vault and unlocking it later both
@@ -187,6 +237,7 @@ export const ExtensionMessageSchema = z.discriminatedUnion('type', [
   FormDetectedMessageSchema,
   GetSessionStateMessageSchema,
   GetOriginStateMessageSchema,
+  GetPendingRequestMessageSchema,
   VaultStatusMessageSchema,
   CreateRootIdentityMessageSchema,
   VaultUnlockMessageSchema,
@@ -217,6 +268,12 @@ export interface OriginSummary {
   formCount: number;
   lastDetectedAt: number;
 }
+
+// GET_PENDING_REQUEST's response payload shape (background/firewall/
+// handler.ts's handleGetPendingRequest) -- null when nothing has been
+// detected for that origin this session, matching GET_ORIGIN_STATE's own
+// null-when-absent convention above.
+export type GetPendingRequestResponse = ClassifiedForm[] | null;
 
 // VAULT_STATUS's response payload shape (background/vault/handler.ts's
 // handleVaultStatus), named once for the same reason as OriginSummary above.

@@ -41,9 +41,30 @@ describe('handleFormDetected', () => {
 
     const state = await getSessionState();
     // origin is normalized (default port stripped, lowercased) before being
-    // used as a storage key -- see shared/origin.ts.
+    // used as a storage key -- see shared/origin.ts. The stored form is
+    // classified (Phase 3), not just counted -- confirming handleFormDetected
+    // actually runs the field through classifier.ts before persisting it.
     expect(state.originForms['https://example.com']).toEqual({
-      formCount: 1,
+      forms: [
+        {
+          formIndex: 0,
+          action: '/login',
+          method: 'post',
+          fields: [
+            {
+              tagName: 'input',
+              type: 'email',
+              name: 'email',
+              id: null,
+              required: true,
+              autocomplete: null,
+              fieldType: 'email',
+              sensitivity: 'private',
+              apparentlyRequired: true,
+            },
+          ],
+        },
+      ],
       lastDetectedAt: 12345,
     });
   });

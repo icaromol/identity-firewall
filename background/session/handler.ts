@@ -13,7 +13,8 @@ export async function handleGetSessionState(
   return {
     originsWithForms: Object.entries(state.originForms).map(([origin, record]) => ({
       origin,
-      ...record,
+      formCount: record.forms.length,
+      lastDetectedAt: record.lastDetectedAt,
     })),
   };
 }
@@ -22,5 +23,6 @@ export async function handleGetOriginState(
   message: GetOriginStateMessage,
 ): Promise<{ formCount: number; lastDetectedAt: number } | null> {
   const state = await getSessionState();
-  return state.originForms[normalizeOrigin(message.payload.origin)] ?? null;
+  const record = state.originForms[normalizeOrigin(message.payload.origin)];
+  return record ? { formCount: record.forms.length, lastDetectedAt: record.lastDetectedAt } : null;
 }
