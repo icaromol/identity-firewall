@@ -1,13 +1,20 @@
 <script lang="ts" setup>
 // M5 -- the real "sites detected this session" view, backed by
 // stores/session.store.ts. M4 adds the Vault section's three real states
-// (setup/locked/unlocked), backed by stores/vault.store.ts.
+// (setup/locked/unlocked), backed by stores/vault.store.ts. Phase 3 M4/M5
+// add the "Pending request" section below, backed by
+// stores/firewall.store.ts -- the Identity Firewall's approval UI.
 import { onMounted, ref } from 'vue';
+import { getFieldKey } from '../../shared/fieldKey';
+import type { ClassifiedField, ClassifiedForm } from '../../shared/messages';
+import type { ResponseType } from '../../shared/vault-schema';
+import { useFirewallStore } from '../../stores/firewall.store';
 import { useSessionStore } from '../../stores/session.store';
 import { useVaultStore } from '../../stores/vault.store';
 
 const session = useSessionStore();
 const vault = useVaultStore();
+const firewall = useFirewallStore();
 
 const setupPassphrase = ref('');
 const unlockPassphrase = ref('');
@@ -19,7 +26,27 @@ const restoreNewPassphrase = ref('');
 onMounted(() => {
   session.fetchSessionState();
   vault.fetchStatus();
+  firewall.fetchPendingRequest();
 });
+
+// Preserves each field's true index within form.fields (needed for
+// getFieldKey's positional fallback) while still letting the template
+// skip unmanaged fields (fieldType === null) -- a plain template
+// v-for + v-if on the same element isn't allowed in Vue 3, and filtering
+// form.fields directly would renumber the survivors, breaking that
+// fallback for any field identified by position rather than name/id.
+// biome-ignore lint/correctness/noUnusedVariables: called from <template>'s v-for -- Biome only lints the <script> block, it can't see template usage.
+function fieldEntries(form: ClassifiedForm): { field: ClassifiedField; key: string }[] {
+  return form.fields
+    .map((field, index) => ({ field, key: getFieldKey(field, index) }))
+    .filter((entry) => entry.field.fieldType !== null);
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: called from @change in <template> -- Biome only lints the <script> block, it can't see template usage.
+function onDecisionChange(formIndex: number, fieldKey: string, event: Event): void {
+  const value = (event.target as HTMLSelectElement).value;
+  if (value) firewall.setDecision(formIndex, fieldKey, value as ResponseType);
+}
 
 // biome-ignore lint/correctness/noUnusedVariables: called from @submit.prevent in <template> -- Biome only lints the <script> block, it can't see template usage.
 function submitSetupPassphrase() {
@@ -101,6 +128,95 @@ function submitRestoreWithPassphrase() {
       </ul>
 
       <p v-else class="mt-2 text-neutral-400">No forms detected yet this session.</p>
+    </section>
+
+    <section class="mt-4 border-t border-neutral-800 pt-4">
+      <h2 class="text-xs font-semibold uppercase tracking-wide text-neutral-400">
+        Pending request{{ firewall.origin ? ` — ${firewall.origin}` : '' }}
+      </h2>
+
+      <p
+        v-if="firewall.status === 'idle' || firewall.status === 'loading'"
+        class="mt-2 text-neutral-400"
+      >
+        Loading…
+      </p>
+
+      <p v-else-if="firewall.status === 'error'" class="mt-2 text-red-400">
+        Could not load pending request: {{ firewall.error }}
+      </p>
+
+      <!-- Requires PersonalData, which requires an unlocked vault --
+           handleGetPendingRequest throws VaultLockedError otherwise,
+           surfaced here as a plain error string rather than a crash. -->
+      <p v-else-if="firewall.forms.length === 0" class="mt-2 text-neutral-400">
+        Nothing pending for this tab.
+      </p>
+
+      <div v-else class="mt-2 space-y-4">
+        <div class="flex gap-2">
+          <button
+            type="button"
+            class="rounded border border-neutral-700 px-2 py-1 text-xs text-neutral-300"
+            @click="firewall.applyApproveAll()"
+          >
+            Approve all
+          </button>
+          <button
+            type="button"
+            class="rounded border border-neutral-700 px-2 py-1 text-xs text-neutral-300"
+            @click="firewall.applyDenyOptional()"
+          >
+            Deny optional fields
+          </button>
+        </div>
+
+        <div
+          v-for="form in firewall.forms"
+          :key="form.formIndex"
+          class="space-y-2 rounded border border-neutral-800 p-2"
+        >
+          <ul class="space-y-1">
+            <li
+              v-for="entry in fieldEntries(form)"
+              :key="entry.key"
+              class="flex items-center justify-between gap-2"
+            >
+              <div>
+                <span>{{ entry.field.fieldType }}</span>
+                <span class="ml-1 text-xs text-neutral-500">{{ entry.field.sensitivity }}</span>
+                <span v-if="!entry.field.apparentlyRequired" class="ml-1 text-xs text-neutral-500"
+                  >(optional)</span
+                >
+              </div>
+              <select
+                class="rounded border border-neutral-700 bg-neutral-800 px-1 py-0.5 text-xs text-neutral-100"
+                :value="firewall.getDecision(form.formIndex, entry.key) ?? ''"
+                @change="onDecisionChange(form.formIndex, entry.key, $event)"
+              >
+                <option value="" disabled>Choose…</option>
+                <option
+                  v-for="r in firewall.availableResponses[entry.field.fieldType!] ?? []"
+                  :key="r"
+                  :value="r"
+                >
+                  {{ r }}
+                </option>
+              </select>
+            </li>
+          </ul>
+
+          <button
+            type="button"
+            class="w-full rounded bg-neutral-100 px-3 py-1.5 font-medium text-neutral-900 disabled:opacity-50"
+            :disabled="firewall.submittingFormIndex === form.formIndex"
+            @click="firewall.submitForm(form.formIndex)"
+          >
+            Submit
+          </button>
+          <p v-if="firewall.submitError" class="text-xs text-red-400">{{ firewall.submitError }}</p>
+        </div>
+      </div>
     </section>
 
     <section class="mt-4 border-t border-neutral-800 pt-4">

@@ -4,13 +4,26 @@
 // over document.forms, or nothing at all if the page has no forms. See
 // content/formDetection.ts for the pure extraction logic this composes.
 import { browser } from 'wxt/browser';
+import { applyAutofill } from '../content/autofill';
 import { buildFormDetectedMessage } from '../content/formDetection';
 import type { MessageResponse } from '../shared/messages';
+import { AutofillFieldsMessageSchema } from '../shared/messages';
 
 export default defineContentScript({
   matches: ['http://*/*', 'https://*/*'],
   runAt: 'document_idle',
   main() {
+    // AUTOFILL_FIELDS (Phase 3 M5) arrives via browser.tabs.sendMessage
+    // from background, never through the FORM_DETECTED send below --
+    // this is the content script's first-ever inbound listener. Validated
+    // directly against its own schema, not the full ExtensionMessage
+    // union, since this listener only ever expects the one message type.
+    browser.runtime.onMessage.addListener((raw) => {
+      const parsed = AutofillFieldsMessageSchema.safeParse(raw);
+      if (!parsed.success) return; // not ours -- let another listener (if any) handle it
+      applyAutofill(document, parsed.data);
+    });
+
     const message = buildFormDetectedMessage(document, location.href, Date.now());
     if (!message) return;
 

@@ -11,11 +11,17 @@
 // POLICY_DECISION, etc. still belong to Phase 3/4 and aren't here yet.
 
 import { z } from 'zod';
-import type { CredentialRecord, PersonalData, ServiceIdentityMeta } from './vault-schema';
+import type {
+  CredentialRecord,
+  PersonalData,
+  ResponseType,
+  ServiceIdentityMeta,
+} from './vault-schema';
 import {
   Argon2ParamsSchema,
   CredentialRecordSchema,
   PersonalDataSchema,
+  ResponseTypeSchema,
   SensitivityLevelSchema,
 } from './vault-schema';
 
@@ -110,6 +116,40 @@ export const GetPendingRequestMessageSchema = z.object({
   payload: z.object({ origin: z.string() }),
 });
 export type GetPendingRequestMessage = z.infer<typeof GetPendingRequestMessageSchema>;
+
+// tabId travels explicitly in the payload, not read off the sender --
+// this message originates in the POPUP (an extension page with no tab of
+// its own), not a content script, so HandlerContext.sender.tab would be
+// undefined. The popup captures the active tab's id itself (the same
+// browser.tabs.query() call it already needs for GET_PENDING_REQUEST's
+// origin) and passes it through so the handler knows which tab's content
+// script to relay AUTOFILL_FIELDS to.
+export const SubmitFieldDecisionsMessageSchema = z.object({
+  type: z.literal('SUBMIT_FIELD_DECISIONS'),
+  payload: z.object({
+    origin: z.string(),
+    tabId: z.number(),
+    formIndex: z.number(),
+    decisions: z.record(z.string(), ResponseTypeSchema), // keyed by shared/fieldKey.ts's getFieldKey
+  }),
+});
+export type SubmitFieldDecisionsMessage = z.infer<typeof SubmitFieldDecisionsMessageSchema>;
+
+// --- Background -> Content script (Phase 3 M5) ---
+// Sent via browser.tabs.sendMessage(tabId, ...), never through
+// background/router/dispatch.ts's own browser.runtime.onMessage listener
+// (that listener only ever receives content-script/popup -> background
+// traffic) -- entrypoints/content.ts validates and handles this itself.
+// Only fields that resolved to a non-null value are present here -- a
+// Deny decision is simply absent, not included with a null/empty value.
+export const AutofillFieldsMessageSchema = z.object({
+  type: z.literal('AUTOFILL_FIELDS'),
+  payload: z.object({
+    formIndex: z.number(),
+    values: z.record(z.string(), z.string()), // keyed by shared/fieldKey.ts's getFieldKey
+  }),
+});
+export type AutofillFieldsMessage = z.infer<typeof AutofillFieldsMessageSchema>;
 
 // --- Popup -> Background: vault unlock (shared by CREATE_ROOT_IDENTITY
 // and VAULT_UNLOCK -- setting up the vault and unlocking it later both
@@ -238,6 +278,8 @@ export const ExtensionMessageSchema = z.discriminatedUnion('type', [
   GetSessionStateMessageSchema,
   GetOriginStateMessageSchema,
   GetPendingRequestMessageSchema,
+  SubmitFieldDecisionsMessageSchema,
+  AutofillFieldsMessageSchema,
   VaultStatusMessageSchema,
   CreateRootIdentityMessageSchema,
   VaultUnlockMessageSchema,
@@ -273,7 +315,28 @@ export interface OriginSummary {
 // handler.ts's handleGetPendingRequest) -- null when nothing has been
 // detected for that origin this session, matching GET_ORIGIN_STATE's own
 // null-when-absent convention above.
-export type GetPendingRequestResponse = ClassifiedForm[] | null;
+//
+// availableResponses is computed server-side (background has PersonalData
+// and aliasProviderConfig; the popup has neither) using the exact same
+// responseAvailability.ts logic handleSubmitFieldDecisions re-validates
+// against later -- one source of truth for "what's allowed," not a second
+// client-side copy that could drift. Keyed by fieldType, not per-field,
+// since two fields sharing a fieldType always share the same availability.
+export interface PendingRequest {
+  forms: ClassifiedForm[];
+  availableResponses: Partial<Record<PersonalDataFieldName, ResponseType[]>>;
+}
+export type GetPendingRequestResponse = PendingRequest | null;
+
+// SUBMIT_FIELD_DECISIONS's response payload shape (background/firewall/
+// handler.ts's handleSubmitFieldDecisions) -- resolvedValues mirrors
+// AUTOFILL_FIELDS's own `values` shape so the popup can show what was
+// actually filled without a second round trip, even though the real
+// write-back happens in the content script via the relayed AUTOFILL_FIELDS
+// message, not via this response directly.
+export interface SubmitFieldDecisionsResponse {
+  resolvedValues: Record<string, string>;
+}
 
 // VAULT_STATUS's response payload shape (background/vault/handler.ts's
 // handleVaultStatus), named once for the same reason as OriginSummary above.

@@ -47,6 +47,10 @@ This is the first phase where data actually crosses the trust boundary to a real
   - `classifyForm(form: DetectedForm): ClassifiedForm` (maps `classifyField` over `form.fields`).
 - **Acceptance**: one unit test per `PersonalData` field type confirming each detection path (type-based, autocomplete-based, name/id-regex-based) independently classifies correctly; a field matching none of them (e.g. a `<textarea name="message">`) classifies `fieldType: null`.
 
+#### M1 — Implementation (as built)
+
+Built as planned. `ClassifiedField`/`ClassifiedForm` ended up defined as Zod schemas in `shared/messages.ts` rather than plain interfaces in `classifier.ts` itself (re-exported from there for callers) — needed so `GET_PENDING_REQUEST`'s response type (M2) could reference them without `shared/` importing from `background/` or vice versa, the same layering `DetectedField`/`DetectedForm` already established. One real bug caught by review: the email synonym list's original `'e-mail'` entry could never match anything, since the tokenizer splits on every non-alphanumeric character including the hyphen — fixed to `'mail'`.
+
 ### M2 — Session state + the pending-request message
 
 - `background/session/state.ts`: `OriginFormRecord` gains `forms: ClassifiedForm[]` (the actual classified structure, not just a count) — `formCount` becomes `forms.length` and can be dropped or derived.
@@ -56,12 +60,20 @@ This is the first phase where data actually crosses the trust boundary to a real
 - `background/router/registry.ts`: `GET_PENDING_REQUEST` → capability `'firewall'`.
 - **Acceptance**: `FORM_DETECTED` for a form with a recognizable `email` field, followed by `GET_PENDING_REQUEST` for that origin, round-trips the classification correctly through session storage.
 
+#### M2 — Implementation (as built)
+
+`GetPendingRequestResponse` ended up richer than this bullet's original `ClassifiedForm[] | null` sketch — see M3/M4's as-built notes below for why (`availableResponses` needed to travel with it). Otherwise built as planned. A toolbar-badge update (`browser.action.setBadgeText`, the recognized-field count for the sending tab) was folded into `handleFormDetected` here rather than deferred to M4, since it's driven by the exact same classification result this milestone already computes — no reason to compute it twice or store it separately just to match the plan's original milestone boundary.
+
 ### M3 — Response Generator + availability matrix
 
 - `background/firewall/responseAvailability.ts`: `availableResponses(fieldType, hasRealValue, aliasProviderConfigured): ResponseType[]`, implementing design decision 5's table exactly.
 - `background/firewall/syntheticGenerator.ts`: `generateSyntheticValue(fieldType): string` and `generateNonsenseValue(fieldType): string`.
 - `background/firewall/responseGenerator.ts`: `generateResponseValue(fieldType, responseType, personalData): string | null` — `real` reads `personalData[fieldType]`, `synthetic`/`nonsense` delegate to the generators above, `deny` returns `null` (meaning: don't fill this field, don't send it).
 - **Acceptance**: unit tests confirming the availability matrix matches design decision 5's table exactly (including the highly-sensitive real-or-deny-only restriction), and that synthetic email values always end in `.invalid`.
+
+#### M3 — Implementation (as built)
+
+Built as planned, no surprises. `generateSyntheticValue`/`generateNonsenseValue` throw (rather than silently returning something) if ever called for `nationalId` — a defensive invariant check, not expected to be reachable given `responseAvailability.ts` never offers Synthetic/Nonsense for a highly-sensitive field, but cheap to assert loudly if that ever changes.
 
 ### M4 — Approval UI (popup)
 
@@ -71,6 +83,14 @@ This is the first phase where data actually crosses the trust boundary to a real
 - `browser.action.setBadgeText` reflects a pending request's field count when a form is detected on the active tab.
 - **Acceptance**: manual — open a real page with a recognizable form, confirm the popup shows the correct classified fields with the correct available response options per field.
 
+#### M4 — Implementation (as built)
+
+- **`availableResponses` moved server-side into `GET_PENDING_REQUEST`'s own response**, computed by `handleGetPendingRequest` from `PersonalData` and `aliasProviderConfig` (both vault-only, neither reachable from the popup directly) rather than duplicated as a second client-side copy of `responseAvailability.ts`'s logic — one source of truth, the same logic `handleSubmitFieldDecisions` re-validates against. `GetPendingRequestResponse` is therefore `{ forms, availableResponses } | null`, not the bare `ClassifiedForm[] | null` this milestone's own bullet (and M2's) originally sketched.
+- **A real, non-obvious permission gap, found only by actually running this in a browser**: `browser.tabs.query({active, currentWindow})` with *no* tab-related permission at all returns a `Tab` object with `url`/`title` stripped — `firewall.store.ts` had nothing to resolve an origin from. Fixed by adding `'activeTab'` to `wxt.config.ts`'s manifest permissions — deliberately not the broader `'tabs'` permission (which would show Chrome's "read your browsing history" warning and grant standing visibility into every tab, not just the one the user is currently looking at). `'activeTab'` is the minimal permission Chrome designed for exactly this "popup wants to know about the current tab" pattern, matching `docs/security-model.md`'s own "minimal permissions" principle.
+- **Known, accepted limitation this permission choice creates**: `activeTab` only activates on a real, user-invoked click on the extension's toolbar icon — something Playwright cannot simulate at all (the same "can't click a real toolbar icon" limitation Phase 1's M6 already documented). So in every e2e test, `tabs.query` behaves exactly as if the permission were entirely absent. This makes the full detect → approve → autofill loop a **manual verification requirement** (see M6 below), not something asserted end-to-end in the automated suite — `tests/e2e/firewallApproval.test.ts` instead asserts the *graceful degradation* path (a clear "Could not determine the active tab" message, not a crash or a silently blank section), which is exactly the state Playwright itself is permanently stuck in.
+- Approval UI landed as a new section inside the existing `entrypoints/popup/App.vue` (not a separate `FirewallApproval.vue`) — the added template stayed small enough that a second file would have been pure ceremony, matching this project's general anti-premature-abstraction stance.
+- `stores/firewall.store.ts` keys its `decisions` map by `` `${formIndex}:${fieldKey}` ``, not `fieldKey` alone — two different forms on the same page could otherwise share a field name (e.g. both a login and signup form present with an "email" field) and silently collide on one decision.
+
 ### M5 — Submit decisions + autofill round-trip
 
 - `shared/messages.ts`: `SubmitFieldDecisionsMessageSchema` (`SUBMIT_FIELD_DECISIONS`, popup → background, payload `{ origin, formIndex, decisions: Record<string, ResponseType> }` keyed by field `name`/`id`) and `AutofillFieldsMessageSchema` (`AUTOFILL_FIELDS`, background → content, payload `{ formIndex, values: Record<string, string> }` — only fields resolving to a non-null value are included, `deny` fields are simply absent).
@@ -78,8 +98,15 @@ This is the first phase where data actually crosses the trust boundary to a real
 - `entrypoints/content.ts`: add a `browser.runtime.onMessage` listener (new — the content script has only ever sent messages before this) that, on `AUTOFILL_FIELDS`, finds each field by `formIndex` + `name`/`id`, sets its value using the native property setter (not the framework-shadowed one, per design decision 8), and dispatches real `input`/`change` events.
 - **Acceptance**: a Playwright e2e test against a plain HTML fixture form (extending `tests/e2e/fixtures/server.ts`'s pattern from Phase 1) confirming approve-all correctly fills recognizable fields; a *second* e2e test against a minimal React-controlled-input fixture, confirming the native-setter technique actually works there too (design decision 8's stated risk) — if this fails, Vue's own controlled-input shadowing needs the same verification given the popup is itself Vue, though the target page's framework (not the extension's) is what matters here.
 
+#### M5 — Implementation (as built)
+
+- **`tabId` travels explicitly in `SUBMIT_FIELD_DECISIONS`'s own payload, not read off `HandlerContext.sender`** — this milestone's own bullet above assumed the sender's `tab.id` would make the relay tab-scoped "for free," but that's only true for a message sent *from a content script*. `SUBMIT_FIELD_DECISIONS` is sent by the **popup** (an extension page with no tab of its own), so `sender.tab` is always `undefined` for it. The popup captures the active tab's id itself (the same `browser.tabs.query()` call already needed for `GET_PENDING_REQUEST`'s origin) and passes it through.
+- **`handleSubmitFieldDecisions` re-derives each field's `fieldType` from the session's own already-classified record**, never trusting anything about a field's type from the client — the popup only ever sends `{ key -> ResponseType }`. It also re-validates each decision against `availableResponses()` before generating a value, failing loudly (not silently substituting) if a decision falls outside what's actually allowed for that field.
+- **The planned React-controlled-input fixture test was not built** — the automated e2e suite can't reach this far at all, for the same `activeTab`/Playwright-can't-click-the-toolbar reason M4's as-built notes describe (there's no way to get past the approval UI to trigger autofill in the first place). `content/autofill.ts`'s native-setter technique is instead covered by a jsdom unit test (`tests/unit/content/autofill.test.ts`) confirming plain `<input>`/`<textarea>`/`<select>` all receive the value and fire `input`/`change` — a real React/Vue-controlled-input fixture is deferred to M6's manual verification pass.
+
 ### M6 — Full-loop verification and docs
 
+- **The full detect → classify → approve → autofill loop needs manual verification in a real browser** — M4's as-built notes above explain why: `activeTab` never activates under Playwright, so no automated test can drive the popup against a real active tab end-to-end. This mirrors Phase 2's M9 (WebAuthn can't be scripted either) — same category of gap, same resolution.
 - Manual pass against a handful of real signup forms (not just the fixture page) to sanity-check the classifier's real-world hit rate — an honest record of what it does and doesn't recognize correctly belongs in this milestone's "as built" notes, not an unstated assumption.
 - `docs/data-model.md`/`docs/privacy-model.md`: no changes expected (this phase implements what they already specify) unless real-world testing surfaces a genuine gap in the documented design.
 - `/code-review` pass, fix real findings, commit, push — same rhythm as every Phase 2 milestone.

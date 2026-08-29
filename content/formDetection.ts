@@ -17,7 +17,7 @@ import { normalizeOrigin } from '../shared/origin';
 
 // Named once and reused by both functions below, rather than duplicating
 // the union type at each use site.
-type DetectableFieldElement = HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
+export type DetectableFieldElement = HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
 
 // instanceof, not a tagName string comparison: Element.tagName is
 // uppercase in HTML documents but preserves source case in XML/XHTML
@@ -30,6 +30,17 @@ function isDetectableField(el: Element): el is DetectableFieldElement {
     el instanceof HTMLTextAreaElement ||
     el instanceof HTMLSelectElement
   );
+}
+
+/**
+ * The same field-order, same-filter walk extractForms() uses below --
+ * exported so entrypoints/content.ts's AUTOFILL_FIELDS listener (Phase 3
+ * M5) can re-derive the identical ordering live from the DOM at fill time,
+ * matching the order shared/fieldKey.ts's positional fallback (`#${index}`)
+ * assumes.
+ */
+export function getDetectableFields(form: HTMLFormElement): DetectableFieldElement[] {
+  return Array.from(form.elements).filter(isDetectableField);
 }
 
 function extractField(el: DetectableFieldElement): DetectedField {
@@ -56,7 +67,7 @@ export function extractForms(doc: Document): DetectedForm[] {
     formIndex,
     action: form.getAttribute('action'),
     method: form.getAttribute('method'),
-    fields: Array.from(form.elements).filter(isDetectableField).map(extractField),
+    fields: getDetectableFields(form).map(extractField),
   }));
 }
 
