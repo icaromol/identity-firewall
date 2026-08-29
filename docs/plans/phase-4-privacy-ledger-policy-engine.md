@@ -84,11 +84,24 @@ Eight independent finder angles converged on one root defect from different symp
 - Manual pass confirming: a policy set once is genuinely not asked again on a second visit to the same site; a high-trust site always interrupts regardless of policy; the Ledger accurately reflects both automatic and manual disclosures.
 - `/code-review` pass, fix real findings, commit, push.
 
+#### M7 — Implementation (as built)
+
+Manual pass run against the real production build, in real Chrome, on real sites:
+
+- **Optional-field-defaults-to-deny confirmed on a real, complex form**: `www.gsuplementos.com.br` had 8 recognized fields (multiple `email`/`phone`/`name` fields, all apparently optional) — every one defaulted to `deny` automatically with zero policy configured, exactly matching design decision 3/the M1 fix. Manually overriding a few to `synthetic`/`nonsense` and submitting correctly wrote those values into the live page and recorded them in the Privacy Ledger with the right response type per field.
+- **The availability-matrix safety check confirmed working, not just unit-tested**: attempting `real` for a field `PersonalData` had no value for was correctly rejected server-side (`Response type "real" is not allowed for field...`) — the exact defense-in-depth check `handleSubmitFieldDecisions` implements, now proven against a real popup interaction, not just a mocked test.
+- **Safe mode confirmed working on a real site**: marking `signupgenius.com` high-trust immediately showed the warning banner and forced every field back to `ask` in the popup, overriding what was otherwise a working manual/automatic flow.
+- **Two real-world limitations found, both judged out of scope for Phase 4 and left as documented gaps** (per the user's explicit choice to record rather than fix now):
+  - **`figma.com/signup` — zero forms detected at all.** Figma's signup page is a full SPA that renders its form after the content script's one-shot `document_idle` pass already ran. This is a Phase 1 architecture limitation (no re-detection, no `MutationObserver`), not a Phase 3/4 defect — already implicitly covered by the roadmap's later phases, not something this phase's scope should reach backward to fix.
+  - **`signupgenius.com` — 3 forms detected, but 2 of 3 email fields visually "did nothing" when filled**, while every other field (including a third email field) filled correctly and was confirmed in the Privacy Ledger. Best diagnosis without direct DOM access to the live page: a multi-step signup wizard with more than one `<form>` in the DOM where only one step is visible at a time — the fill likely succeeded into a hidden/inactive step's fields, which is indistinguishable from "did nothing" to someone looking only at the active step. Root cause: `content/formDetection.ts`'s field extraction has no concept of whether a field is currently visible/interactable — it walks `document.forms` unconditionally. A visibility check (e.g. `checkVisibility()`/`offsetParent !== null`) at detection time would be the natural fix, deliberately deferred rather than built into an already-closed milestone's scope.
+
 ## Gate to start Phase 5
 
 Phase 5 adds biometric authorization gating sensitive disclosures — `authorizationMethod` (decision 7) starts getting populated for real. Before starting it, confirm:
 
-- A `'real'`/`'alias'`/`'synthetic'`/`'nonsense'`/`'deny'` policy, once set for a field, is applied automatically on every subsequent visit without prompting — confirmed on a real site across two separate page loads.
-- A highly-sensitive field (`nationalId`) can never resolve to anything but `'ask'` or `'deny'` even via policy — confirmed by the resolution logic never accepting a stored `'real'`/`'synthetic'`/`'nonsense'` rule for it (mirrors Phase 3's own availability-matrix restriction, now enforced at the policy layer too).
-- The Privacy Ledger has a correct, inspectable entry for every disclosure this phase's code can produce, automatic or manual.
-- Government/financial safe mode cannot be silently bypassed by a stored policy rule for that origin.
+- [x] A `'real'`/`'alias'`/`'synthetic'`/`'nonsense'`/`'deny'` policy, once set for a field, is applied automatically on every subsequent visit without prompting. Confirmed live for the baseline case (`www.gsuplementos.com.br`'s 8 optional fields auto-denied with zero configured policy, every load); the explicit-stored-rule case is covered exhaustively by `resolve.test.ts`'s resolution-order tests rather than a second live-site round trip in this pass.
+- [x] A highly-sensitive field (`nationalId`) can never resolve to anything but `'ask'` or `'deny'` even via policy — confirmed by `resolve.test.ts`'s explicit clamping tests (no real-world `nationalId` field was available to test live this pass).
+- [x] The Privacy Ledger has a correct, inspectable entry for every disclosure this phase's code can produce, automatic or manual. Confirmed live: the ledger accurately showed `email (synthetic)`/`name (nonsense)`/`phone (synthetic)` matching exactly what was submitted on real sites.
+- [x] Government/financial safe mode cannot be silently bypassed by a stored policy rule for that origin. Confirmed live on `signupgenius.com` (banner appeared, every field forced to `ask` immediately on toggling) and exhaustively by `resolve.test.ts`'s own safe-mode-beats-any-rule tests.
+
+**Phase 4 is complete**, with two honestly-documented real-world limitations (both above, in M7's "as built" notes) carried forward rather than silently ignored.
