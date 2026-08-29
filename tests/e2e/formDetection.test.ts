@@ -5,50 +5,13 @@
 //
 // Deliberately not attempted here: simulating the ~30-second MV3
 // service-worker idle-kill/restart -- Playwright doesn't reliably control
-// that timing. That property stays a manual-only check (M7).
+// that timing. That property stayed a manual-only check through M7; M8
+// (tests/e2e/vaultLifecycle.test.ts) later found a way to force a real
+// restart on demand via CDP instead of waiting out the timer -- see this
+// file's shared context/extensionId fixture, now in ./fixtures/extension.
 
-import path from 'node:path';
-import { type BrowserContext, test as base, chromium, expect } from '@playwright/test';
+import { expect, test } from './fixtures/extension';
 import { type FixtureServer, startFixtureServer } from './fixtures/server';
-
-// Points at the real production build -- not a hand-maintained test
-// fixture extension. `pnpm test:e2e` runs `pnpm build` first (see
-// package.json) so this reflects current source, never a stale build.
-// import.meta.dirname, not __dirname -- see fixtures/server.ts's comment.
-const EXTENSION_PATH = path.join(import.meta.dirname, '../../.output/chrome-mv3');
-
-// The official Playwright extension-testing pattern
-// (playwright.dev/docs/chrome-extensions, verified directly rather than
-// assumed): a persistent context -- a plain chromium.launch() does not
-// support extensions at all -- loaded with the real unpacked build, plus
-// a fixture that reads the extension's own ID off its service worker.
-// `channel: 'chromium'` is what makes this work headless.
-const test = base.extend<{ context: BrowserContext; extensionId: string }>({
-  // Playwright requires the first parameter to be an actual (possibly
-  // empty) object-destructuring pattern -- it's how Playwright detects
-  // which other fixtures this one depends on. This fixture needs none.
-  // biome-ignore lint/correctness/noEmptyPattern: required by Playwright, see above
-  context: async ({}, use) => {
-    const context = await chromium.launchPersistentContext('', {
-      channel: 'chromium',
-      args: [`--disable-extensions-except=${EXTENSION_PATH}`, `--load-extension=${EXTENSION_PATH}`],
-    });
-    await use(context);
-    await context.close();
-  },
-  extensionId: async ({ context }, use) => {
-    let [serviceWorker] = context.serviceWorkers();
-    if (!serviceWorker) serviceWorker = await context.waitForEvent('serviceworker');
-
-    const extensionId = serviceWorker.url().split('/')[2];
-    if (!extensionId) {
-      throw new Error(
-        `Could not determine extension ID from service worker URL: ${serviceWorker.url()}`,
-      );
-    }
-    await use(extensionId);
-  },
-});
 
 test('popup shows detected forms, accumulating across origins as the user navigates', async ({
   context,
