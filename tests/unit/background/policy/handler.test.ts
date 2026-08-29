@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fakeBrowser } from 'wxt/testing/fake-browser';
 import {
   handleDeletePolicy,
@@ -42,11 +42,28 @@ describe('policy handlers', () => {
   });
 
   it('handleSetHighTrustOrigin round-trips through the message handler', async () => {
+    vi.spyOn(fakeBrowser.tabs, 'get').mockResolvedValue({
+      url: 'https://gov.example/',
+    } as never);
+
     const result = await handleSetHighTrustOrigin({
       type: 'SET_HIGH_TRUST_ORIGIN',
-      payload: { origin: 'https://gov.example', isHighTrust: true },
+      payload: { origin: 'https://gov.example', tabId: 1, isHighTrust: true },
     });
     expect(result).toEqual(['https://gov.example']);
+  });
+
+  it('handleSetHighTrustOrigin refuses when the tab has navigated away from the claimed origin', async () => {
+    vi.spyOn(fakeBrowser.tabs, 'get').mockResolvedValue({
+      url: 'https://attacker.example/',
+    } as never);
+
+    await expect(
+      handleSetHighTrustOrigin({
+        type: 'SET_HIGH_TRUST_ORIGIN',
+        payload: { origin: 'https://gov.example', tabId: 1, isHighTrust: true },
+      }),
+    ).rejects.toThrow(/no longer showing origin/);
   });
 
   it('handleGetPrivacyLedger returns only entries for the requested (normalized) origin', async () => {

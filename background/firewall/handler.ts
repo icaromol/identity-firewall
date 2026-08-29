@@ -96,18 +96,27 @@ export async function handleGetPendingRequest(
 ): Promise<GetPendingRequestResponse> {
   const state = await getSessionState();
   const record = state.originForms[normalizeOrigin(message.payload.origin)];
-  if (!record) return null;
+  const forms = record?.forms ?? [];
 
   const [personalData, policyContext] = await Promise.all([getPersonalData(), loadPolicyContext()]);
 
+  // isHighTrustOrigin/resolvedActions are computed even when no form has
+  // been detected this session (record is undefined, forms is empty) --
+  // a /code-review finding: safe-mode status is a PERSISTENT per-origin
+  // setting, not tied to session form-detection state, so the popup needs
+  // to learn it (and show the warning banner) the moment it knows the
+  // origin at all, not only once a form happens to exist. An empty
+  // `forms` array already signals "nothing pending" via forms.length,
+  // same as the previous `null` response did -- no caller distinguished
+  // the two.
   return {
-    forms: record.forms,
+    forms,
     availableResponses: computeAvailableResponses(
-      record.forms,
+      forms,
       personalData,
       policyContext.aliasProviderConfigured,
     ),
-    resolvedActions: computeResolvedActions(message.payload.origin, record.forms, policyContext),
+    resolvedActions: computeResolvedActions(message.payload.origin, forms, policyContext),
     isHighTrustOrigin: policyContext.isHighTrustOrigin(message.payload.origin),
   };
 }

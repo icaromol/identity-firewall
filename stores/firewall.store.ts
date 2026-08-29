@@ -48,6 +48,12 @@ export interface FirewallStoreState {
   // Phase 4 M6 -- government/financial safe mode for THIS origin.
   isHighTrustOrigin: boolean;
   decisions: Record<string, ResponseType>; // keyed by compoundKey()
+  // Tracks which decisions THIS store auto-filled from resolvedActions,
+  // as opposed to ones the user picked by hand -- a /code-review finding:
+  // refreshing resolvedActions after an unrelated action (toggling safe
+  // mode) must only overwrite what it previously auto-filled, never a
+  // manual choice, or the user's own picks silently vanish.
+  autoFilledKeys: Set<string>;
   status: 'idle' | 'loading' | 'loaded' | 'error';
   error: string | null;
   submittingFormIndex: number | null;
@@ -56,6 +62,8 @@ export interface FirewallStoreState {
   // store-wide submitError would render the same error under every form's
   // card in the template even though only one of them actually failed.
   submitErrors: Record<number, string>;
+  togglingHighTrust: boolean;
+  highTrustError: string | null;
 }
 
 export const useFirewallStore = defineStore('firewall', {
@@ -67,15 +75,63 @@ export const useFirewallStore = defineStore('firewall', {
     resolvedActions: {},
     isHighTrustOrigin: false,
     decisions: {},
+    autoFilledKeys: new Set(),
     status: 'idle',
     error: null,
     submittingFormIndex: null,
     submitErrors: {},
+    togglingHighTrust: false,
+    highTrustError: null,
   }),
   actions: {
+    // Applies a fresh GET_PENDING_REQUEST response to state. Only clears
+    // decisions this store itself auto-filled last time it ran (tracked
+    // in autoFilledKeys) before re-populating from the new
+    // resolvedActions -- any decision the user picked by hand survives a
+    // refresh triggered by something unrelated (e.g. toggling safe mode).
+    applyPendingRequestData(data: PendingRequest): void {
+      // `?? {}`/`?? false` defend against a response missing a field the
+      // TS type promises is always present -- the message channel itself
+      // is untyped JSON and the response side isn't Zod-validated the way
+      // requests are (see stores/session.store.ts's own comment on this),
+      // so a version-skew or malformed response degrades gracefully here
+      // instead of throwing partway through and landing in the generic
+      // catch-block error state.
+      this.forms = data.forms ?? [];
+      this.availableResponses = data.availableResponses ?? {};
+      this.resolvedActions = data.resolvedActions ?? {};
+      this.isHighTrustOrigin = data.isHighTrustOrigin ?? false;
+
+      for (const key of this.autoFilledKeys) delete this.decisions[key];
+      this.autoFilledKeys = new Set();
+
+      // Pre-fill every field whose Policy Engine resolution is anything
+      // but 'ask' -- "only asks what falls outside the rules"
+      // (privacy-model.md). A field resolving to 'ask' is left blank,
+      // needing the user's own choice, exactly as Phase 3 always worked
+      // before any policy existed.
+      for (const form of this.forms) {
+        form.fields.forEach((field, index) => {
+          if (!field.fieldType) return;
+          const resolved = this.resolvedActions[field.fieldType];
+          if (resolved && resolved !== 'ask') {
+            const key = compoundKey(form.formIndex, getFieldKey(field, index));
+            this.decisions[key] = resolved;
+            this.autoFilledKeys.add(key);
+          }
+        });
+      }
+    },
+
     async fetchPendingRequest(): Promise<void> {
       this.status = 'loading';
       this.error = null;
+      // A fresh mount (or a genuinely new active tab) has no manual
+      // decisions worth preserving from a different origin's session --
+      // cleared explicitly here, unlike applyPendingRequestData's own
+      // narrower auto-filled-only clearing used for same-origin refreshes.
+      this.decisions = {};
+      this.autoFilledKeys = new Set();
 
       try {
         const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
@@ -92,29 +148,11 @@ export const useFirewallStore = defineStore('firewall', {
           type: 'GET_PENDING_REQUEST',
           payload: { origin: this.origin },
         };
-        const response: MessageResponse<PendingRequest | null> =
+        const response: MessageResponse<PendingRequest> =
           await browser.runtime.sendMessage(message);
 
         if (response.ok) {
-          this.forms = response.data?.forms ?? [];
-          this.availableResponses = response.data?.availableResponses ?? {};
-          this.resolvedActions = response.data?.resolvedActions ?? {};
-          this.isHighTrustOrigin = response.data?.isHighTrustOrigin ?? false;
-          this.decisions = {};
-          // Pre-fill every field whose Policy Engine resolution is
-          // anything but 'ask' -- "only asks what falls outside the
-          // rules" (privacy-model.md). A field resolving to 'ask' is left
-          // blank, needing the user's own choice, exactly as Phase 3
-          // always worked before any policy existed.
-          for (const form of this.forms) {
-            form.fields.forEach((field, index) => {
-              if (!field.fieldType) return;
-              const resolved = this.resolvedActions[field.fieldType];
-              if (resolved && resolved !== 'ask') {
-                this.decisions[compoundKey(form.formIndex, getFieldKey(field, index))] = resolved;
-              }
-            });
-          }
+          this.applyPendingRequestData(response.data);
           this.status = 'loaded';
         } else {
           this.error = response.error;
@@ -127,20 +165,51 @@ export const useFirewallStore = defineStore('firewall', {
     },
 
     // Government/financial safe mode (Phase 4 M6) -- marks/unmarks THIS
-    // origin high-trust, then re-fetches so resolvedActions/decisions
-    // reflect the new safe-mode state immediately (a high-trust origin
-    // always resolves every field to 'ask', overriding any stored
-    // policy -- see resolvePolicy's own safe-mode-first ordering).
+    // origin high-trust, then refreshes resolvedActions/decisions so the
+    // effect (every field forced back to 'ask', overriding any stored
+    // policy -- see resolvePolicy's own safe-mode-first ordering) is
+    // visible immediately, without discarding any decision the user
+    // already made by hand (applyPendingRequestData's own guarantee) or
+    // re-querying the active tab a second time (tabId/origin don't change
+    // just because safe mode toggled).
     async toggleHighTrust(): Promise<void> {
-      if (this.origin === null) return;
+      if (this.origin === null || this.tabId === null || this.togglingHighTrust) return;
 
-      const message: SetHighTrustOriginMessage = {
-        type: 'SET_HIGH_TRUST_ORIGIN',
-        payload: { origin: this.origin, isHighTrust: !this.isHighTrustOrigin },
-      };
-      const response: MessageResponse<SetHighTrustOriginResponse> =
-        await browser.runtime.sendMessage(message);
-      if (response.ok) await this.fetchPendingRequest();
+      this.togglingHighTrust = true;
+      this.highTrustError = null;
+
+      try {
+        const setMessage: SetHighTrustOriginMessage = {
+          type: 'SET_HIGH_TRUST_ORIGIN',
+          payload: {
+            origin: this.origin,
+            tabId: this.tabId,
+            isHighTrust: !this.isHighTrustOrigin,
+          },
+        };
+        const setResponse: MessageResponse<SetHighTrustOriginResponse> =
+          await browser.runtime.sendMessage(setMessage);
+        if (!setResponse.ok) {
+          this.highTrustError = setResponse.error;
+          return;
+        }
+
+        const getMessage: GetPendingRequestMessage = {
+          type: 'GET_PENDING_REQUEST',
+          payload: { origin: this.origin },
+        };
+        const getResponse: MessageResponse<PendingRequest> =
+          await browser.runtime.sendMessage(getMessage);
+        if (getResponse.ok) {
+          this.applyPendingRequestData(getResponse.data);
+        } else {
+          this.highTrustError = getResponse.error;
+        }
+      } catch (err) {
+        this.highTrustError = err instanceof Error ? err.message : String(err);
+      } finally {
+        this.togglingHighTrust = false;
+      }
     },
 
     getDecision(formIndex: number, fieldKey: string): ResponseType | undefined {

@@ -165,9 +165,15 @@ export const DeletePolicyMessageSchema = z.object({
 });
 export type DeletePolicyMessage = z.infer<typeof DeletePolicyMessageSchema>;
 
+// tabId travels in the payload for the same reason SUBMIT_FIELD_DECISIONS's
+// does (see that schema's own comment) -- this message also originates in
+// the popup, and the handler re-verifies the tab is still showing `origin`
+// before acting, a /code-review finding: without it, a stale cached
+// origin (the tab navigated away while the popup stayed open) could mark
+// or unmark safe-mode for the wrong site.
 export const SetHighTrustOriginMessageSchema = z.object({
   type: z.literal('SET_HIGH_TRUST_ORIGIN'),
-  payload: z.object({ origin: z.string(), isHighTrust: z.boolean() }),
+  payload: z.object({ origin: z.string(), tabId: z.number(), isHighTrust: z.boolean() }),
 });
 export type SetHighTrustOriginMessage = z.infer<typeof SetHighTrustOriginMessageSchema>;
 
@@ -374,7 +380,11 @@ export interface PendingRequest {
   // resolvePolicy's own safe-mode-first ordering).
   isHighTrustOrigin: boolean;
 }
-export type GetPendingRequestResponse = PendingRequest | null;
+// Never null (a /code-review finding fixed this): isHighTrustOrigin is a
+// persistent per-origin setting the popup needs even when no form has
+// been detected this session, so handleGetPendingRequest always returns a
+// full PendingRequest with forms: [] rather than short-circuiting.
+export type GetPendingRequestResponse = PendingRequest;
 
 // SUBMIT_FIELD_DECISIONS's response payload shape (background/firewall/
 // handler.ts's handleSubmitFieldDecisions) -- resolvedValues mirrors

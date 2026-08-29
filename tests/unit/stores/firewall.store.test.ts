@@ -258,33 +258,103 @@ describe('useFirewallStore', () => {
     expect(store.isHighTrustOrigin).toBe(true);
   });
 
-  it('toggleHighTrust sends SET_HIGH_TRUST_ORIGIN with the flipped value and re-fetches', async () => {
+  it('toggleHighTrust sends SET_HIGH_TRUST_ORIGIN with the flipped value, then re-fetches without re-querying the tab', async () => {
     mockActiveTab();
-    vi.spyOn(fakeBrowser.runtime, 'sendMessage').mockResolvedValueOnce({
+    const sendMessageSpy = vi
+      .spyOn(fakeBrowser.runtime, 'sendMessage')
+      .mockResolvedValueOnce({
+        ok: true,
+        data: { forms: [], availableResponses: {}, isHighTrustOrigin: false },
+      } as never)
+      .mockResolvedValueOnce({ ok: true, data: ['https://example.com'] } as never)
+      .mockResolvedValueOnce({
+        ok: true,
+        data: { forms: [], availableResponses: {}, isHighTrustOrigin: true },
+      } as never);
+    const tabsQuerySpy = vi.spyOn(fakeBrowser.tabs, 'query');
+
+    const store = useFirewallStore();
+    await store.fetchPendingRequest();
+    expect(store.isHighTrustOrigin).toBe(false);
+    expect(tabsQuerySpy).toHaveBeenCalledTimes(1);
+
+    await store.toggleHighTrust();
+
+    // No second tabs.query -- tabId/origin are already known and don't
+    // change just because safe mode toggled.
+    expect(tabsQuerySpy).toHaveBeenCalledTimes(1);
+    expect(sendMessageSpy).toHaveBeenNthCalledWith(2, {
+      type: 'SET_HIGH_TRUST_ORIGIN',
+      payload: { origin: 'https://example.com', tabId: 7, isHighTrust: true },
+    });
+    expect(store.isHighTrustOrigin).toBe(true);
+    expect(store.highTrustError).toBeNull();
+  });
+
+  it("toggleHighTrust preserves a manually-set decision for a field the Policy Engine still leaves at 'ask'", async () => {
+    mockActiveTab();
+    vi.spyOn(fakeBrowser.runtime, 'sendMessage')
+      .mockResolvedValueOnce({
+        ok: true,
+        data: {
+          forms: sampleForms,
+          availableResponses: { email: ['real', 'synthetic', 'deny'] },
+          resolvedActions: {}, // email left at 'ask' -- no auto-fill
+          isHighTrustOrigin: false,
+        },
+      } as never)
+      .mockResolvedValueOnce({ ok: true, data: ['https://example.com'] } as never)
+      .mockResolvedValueOnce({
+        ok: true,
+        data: {
+          forms: sampleForms,
+          availableResponses: { email: ['real', 'synthetic', 'deny'] },
+          resolvedActions: {}, // still 'ask' after toggling -- unrelated to this field
+          isHighTrustOrigin: true,
+        },
+      } as never);
+
+    const store = useFirewallStore();
+    await store.fetchPendingRequest();
+    store.setDecision(0, emailKey, 'synthetic'); // the user's own manual choice
+
+    await store.toggleHighTrust();
+
+    expect(store.getDecision(0, emailKey)).toBe('synthetic');
+  });
+
+  it('toggleHighTrust records a handler-level error from SET_HIGH_TRUST_ORIGIN without throwing', async () => {
+    mockActiveTab();
+    vi.spyOn(fakeBrowser.runtime, 'sendMessage')
+      .mockResolvedValueOnce({
+        ok: true,
+        data: { forms: [], availableResponses: {}, isHighTrustOrigin: false },
+      } as never)
+      .mockResolvedValueOnce({ ok: false, error: 'boom' } as never);
+
+    const store = useFirewallStore();
+    await store.fetchPendingRequest();
+
+    await store.toggleHighTrust();
+
+    expect(store.highTrustError).toBe('boom');
+    expect(store.isHighTrustOrigin).toBe(false); // unchanged -- the write failed
+  });
+
+  it('toggleHighTrust does nothing when a toggle is already in flight', async () => {
+    mockActiveTab();
+    const sendMessageSpy = vi.spyOn(fakeBrowser.runtime, 'sendMessage').mockResolvedValueOnce({
       ok: true,
       data: { forms: [], availableResponses: {}, isHighTrustOrigin: false },
     } as never);
 
     const store = useFirewallStore();
     await store.fetchPendingRequest();
-    expect(store.isHighTrustOrigin).toBe(false);
 
-    const setSpy = vi
-      .spyOn(fakeBrowser.runtime, 'sendMessage')
-      .mockResolvedValueOnce({ ok: true, data: ['https://example.com'] } as never);
-    mockActiveTab();
-    vi.spyOn(fakeBrowser.runtime, 'sendMessage').mockResolvedValueOnce({
-      ok: true,
-      data: { forms: [], availableResponses: {}, isHighTrustOrigin: true },
-    } as never);
-
+    store.togglingHighTrust = true;
     await store.toggleHighTrust();
 
-    expect(setSpy).toHaveBeenCalledWith({
-      type: 'SET_HIGH_TRUST_ORIGIN',
-      payload: { origin: 'https://example.com', isHighTrust: true },
-    });
-    expect(store.isHighTrustOrigin).toBe(true);
+    expect(sendMessageSpy).toHaveBeenCalledTimes(1); // only the initial fetch
   });
 
   it('toggleHighTrust does nothing when the origin is not yet known', async () => {

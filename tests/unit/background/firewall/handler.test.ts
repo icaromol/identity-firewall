@@ -112,12 +112,26 @@ describe('handleGetPendingRequest', () => {
     expect(result?.availableResponses.email).toEqual(['real', 'synthetic', 'nonsense', 'deny']);
   });
 
-  it('returns null for an origin with nothing detected this session', async () => {
+  it('returns an empty-forms response (never null) for an origin with nothing detected this session -- isHighTrustOrigin must still be reported', async () => {
     const message: GetPendingRequestMessage = {
       type: 'GET_PENDING_REQUEST',
       payload: { origin: 'https://nothing-here.example' },
     };
-    expect(await handleGetPendingRequest(message)).toBeNull();
+    const result = await handleGetPendingRequest(message);
+    expect(result.forms).toEqual([]);
+    expect(result.isHighTrustOrigin).toBe(false);
+  });
+
+  it('reports isHighTrustOrigin: true even when no form has been detected this session (a /code-review finding)', async () => {
+    await setHighTrustOrigin('https://gov.example', true);
+
+    const result = await handleGetPendingRequest({
+      type: 'GET_PENDING_REQUEST',
+      payload: { origin: 'https://gov.example' },
+    });
+
+    expect(result.forms).toEqual([]);
+    expect(result.isHighTrustOrigin).toBe(true);
   });
 
   it('reports isHighTrustOrigin and forces "ask" for a field even with a matching real policy', async () => {

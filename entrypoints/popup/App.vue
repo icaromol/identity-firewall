@@ -181,10 +181,15 @@ function submitRestoreWithPassphrase() {
         <input
           type="checkbox"
           :checked="firewall.isHighTrustOrigin"
+          :disabled="firewall.togglingHighTrust"
           @change="firewall.toggleHighTrust()"
         />
         Treat this site as government/financial (always ask, ignore policies)
       </label>
+
+      <p v-if="firewall.highTrustError" class="mt-1 text-xs text-red-400">
+        {{ firewall.highTrustError }}
+      </p>
 
       <p v-if="firewall.isHighTrustOrigin" class="mt-2 text-amber-400">
         ⚠️ This site has been identified as a government/financial service. Automatic identity
