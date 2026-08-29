@@ -7,6 +7,7 @@ import {
 import { handleFormDetected } from '../../../../background/formDetection/handler';
 import { setPersonalData } from '../../../../background/vault/personalData/storage';
 import { createRootIdentity } from '../../../../background/vault/setup';
+import { readVaultIndex } from '../../../../background/vault/storage';
 import type {
   FormDetectedMessage,
   GetPendingRequestMessage,
@@ -246,5 +247,48 @@ describe('handleSubmitFieldDecisions', () => {
         },
       }),
     ).rejects.toThrow(/no longer showing origin/);
+  });
+
+  it('records a Privacy Ledger entry reflecting the manual decision', async () => {
+    await detectEmailForm('https://example.com');
+    await setPersonalData({ email: 'user@example.com' });
+    vi.spyOn(fakeBrowser.tabs, 'sendMessage').mockResolvedValue(undefined);
+
+    await handleSubmitFieldDecisions({
+      type: 'SUBMIT_FIELD_DECISIONS',
+      payload: {
+        origin: 'https://example.com',
+        tabId: 1,
+        formIndex: 0,
+        decisions: { [EMAIL_FIELD_KEY]: 'real' },
+      },
+    });
+
+    const { privacyLedger } = await readVaultIndex();
+    expect(privacyLedger).toHaveLength(1);
+    expect(privacyLedger[0]).toMatchObject({
+      origin: 'https://example.com',
+      requestedFields: ['email'],
+      disclosedFields: { email: 'real' },
+      deniedFields: [],
+      authorizationMethod: null,
+    });
+  });
+
+  it('records a field with no decision made as denied in the Privacy Ledger', async () => {
+    await detectEmailForm('https://example.com');
+    vi.spyOn(fakeBrowser.tabs, 'sendMessage').mockResolvedValue(undefined);
+
+    await handleSubmitFieldDecisions({
+      type: 'SUBMIT_FIELD_DECISIONS',
+      payload: { origin: 'https://example.com', tabId: 1, formIndex: 0, decisions: {} },
+    });
+
+    const { privacyLedger } = await readVaultIndex();
+    expect(privacyLedger[0]).toMatchObject({
+      requestedFields: ['email'],
+      disclosedFields: {},
+      deniedFields: ['email'],
+    });
   });
 });

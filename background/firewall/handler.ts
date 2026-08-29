@@ -10,6 +10,7 @@ import type {
 } from '../../shared/messages';
 import { normalizeOrigin } from '../../shared/origin';
 import type { PersonalData, PersonalDataFieldName, ResponseType } from '../../shared/vault-schema';
+import { recordDisclosure } from '../policy/ledger';
 import { getSessionState } from '../session/state';
 import { getPersonalData } from '../vault/personalData/storage';
 import { readVaultIndex } from '../vault/storage';
@@ -111,10 +112,23 @@ export async function handleSubmitFieldDecisions(
   ]);
 
   const resolvedValues: Record<string, string> = {};
+  const requestedFields: PersonalDataFieldName[] = [];
+  const disclosedFields: Partial<Record<PersonalDataFieldName, ResponseType>> = {};
+  const deniedFields: PersonalDataFieldName[] = [];
+
   form.fields.forEach((field, fieldIndex) => {
+    if (!field.fieldType) return;
+    requestedFields.push(field.fieldType);
+
     const key = getFieldKey(field, fieldIndex);
     const responseType = decisions[key];
-    if (!responseType || !field.fieldType) return;
+    // No decision made for a recognized field, or an explicit Deny, both
+    // count as denied for the Privacy Ledger -- "what does this site know
+    // about me" should reflect that nothing was handed over either way.
+    if (!responseType || responseType === 'deny') {
+      deniedFields.push(field.fieldType);
+      return;
+    }
 
     const hasRealValue = personalData[field.fieldType] !== undefined;
     const allowed = availableResponses(field.fieldType, hasRealValue, aliasProviderConfigured);
@@ -125,7 +139,12 @@ export async function handleSubmitFieldDecisions(
     }
 
     const value = generateResponseValue(field.fieldType, responseType, personalData);
-    if (value !== null) resolvedValues[key] = value;
+    if (value !== null) {
+      resolvedValues[key] = value;
+      disclosedFields[field.fieldType] = responseType;
+    } else {
+      deniedFields.push(field.fieldType);
+    }
   });
 
   const autofillMessage: AutofillFieldsMessage = {
@@ -137,6 +156,7 @@ export async function handleSubmitFieldDecisions(
   // background/router/dispatch.ts's own listener (that only ever receives
   // content-script/popup -> background traffic).
   await browser.tabs.sendMessage(tabId, autofillMessage);
+  await recordDisclosure(origin, requestedFields, disclosedFields, deniedFields);
 
   return { resolvedValues };
 }
