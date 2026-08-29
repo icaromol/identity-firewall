@@ -20,6 +20,11 @@ export const DetectedFieldSchema = z.object({
   name: z.string().nullable(),
   id: z.string().nullable(),
   required: z.boolean(),
+  // Raw autocomplete attribute (e.g. 'email', 'tel', 'bday') -- still
+  // structural extraction, not semantic judgment: it's a literal HTML
+  // attribute, same category as type/name/id. Phase 3's Field Classifier
+  // (background/firewall/classifier.ts) is what actually interprets it.
+  autocomplete: z.string().nullable(),
 });
 export type DetectedField = z.infer<typeof DetectedFieldSchema>;
 

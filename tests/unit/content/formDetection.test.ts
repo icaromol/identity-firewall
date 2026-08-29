@@ -9,17 +9,34 @@ beforeEach(() => {
 });
 
 describe('extractForms', () => {
-  it('captures tagName, type, name, id, and required for a required email input', () => {
+  it('captures tagName, type, name, id, required, and autocomplete for a required email input', () => {
     document.body.innerHTML = `
       <form>
-        <input type="email" name="email" id="email-field" required />
+        <input type="email" name="email" id="email-field" autocomplete="email" required />
       </form>
     `;
 
     const forms = extractForms(document);
     expect(forms[0]?.fields).toEqual([
-      { tagName: 'input', type: 'email', name: 'email', id: 'email-field', required: true },
+      {
+        tagName: 'input',
+        type: 'email',
+        name: 'email',
+        id: 'email-field',
+        required: true,
+        autocomplete: 'email',
+      },
     ]);
+  });
+
+  it('reports null autocomplete when the attribute is absent', () => {
+    document.body.innerHTML = `
+      <form>
+        <input type="text" name="plain" />
+      </form>
+    `;
+
+    expect(extractForms(document)[0]?.fields?.[0]?.autocomplete).toBeNull();
   });
 
   it('reports null name and id for a field with neither attribute', () => {
@@ -48,11 +65,25 @@ describe('extractForms', () => {
     expect(forms).toHaveLength(2);
     expect(forms[0]?.formIndex).toBe(0);
     expect(forms[0]?.fields).toEqual([
-      { tagName: 'input', type: 'text', name: 'first-form-field', id: null, required: false },
+      {
+        tagName: 'input',
+        type: 'text',
+        name: 'first-form-field',
+        id: null,
+        required: false,
+        autocomplete: null,
+      },
     ]);
     expect(forms[1]?.formIndex).toBe(1);
     expect(forms[1]?.fields).toEqual([
-      { tagName: 'input', type: 'text', name: 'second-form-field', id: null, required: false },
+      {
+        tagName: 'input',
+        type: 'text',
+        name: 'second-form-field',
+        id: null,
+        required: false,
+        autocomplete: null,
+      },
     ]);
   });
 
@@ -120,7 +151,16 @@ describe('buildFormDetectedMessage', () => {
             formIndex: 0,
             action: null,
             method: null,
-            fields: [{ tagName: 'input', type: 'email', name: 'email', id: null, required: true }],
+            fields: [
+              {
+                tagName: 'input',
+                type: 'email',
+                name: 'email',
+                id: null,
+                required: true,
+                autocomplete: null,
+              },
+            ],
           },
         ],
       },

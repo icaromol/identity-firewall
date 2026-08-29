@@ -39,6 +39,10 @@ function extractField(el: DetectableFieldElement): DetectedField {
     name: el.name || null,
     id: el.id || null,
     required: el.required,
+    // el.autocomplete reflects the raw attribute value, defaulting to ''
+    // (not 'off') when absent -- normalized to null like name/id above,
+    // rather than reporting the misleading empty string.
+    autocomplete: el.autocomplete || null,
   };
 }
 

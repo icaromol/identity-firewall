@@ -21,7 +21,16 @@ describe('handleFormDetected', () => {
             formIndex: 0,
             action: '/login',
             method: 'post',
-            fields: [{ tagName: 'input', type: 'email', name: 'email', id: null, required: true }],
+            fields: [
+              {
+                tagName: 'input',
+                type: 'email',
+                name: 'email',
+                id: null,
+                required: true,
+                autocomplete: null,
+              },
+            ],
           },
         ],
       },
