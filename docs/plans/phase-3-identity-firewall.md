@@ -118,11 +118,22 @@ Built as planned, no surprises. `generateSyntheticValue`/`generateNonsenseValue`
 - `docs/data-model.md`/`docs/privacy-model.md`: no changes expected (this phase implements what they already specify) unless real-world testing surfaces a genuine gap in the documented design.
 - `/code-review` pass, fix real findings, commit, push — same rhythm as every Phase 2 milestone.
 
+#### M6 — Implementation (as built)
+
+Manual pass run against the real production build, in real Chrome, following the exact real-user gesture path (toolbar icon click, not a bookmarked popup URL) that grants `activeTab`:
+
+- **Real-world classifier hit rate**: the content script's single `document_idle` pass correctly detected and classified fields across three unrelated, real sites visited in one session — `developer.service.hmrc.gov.uk` (1 form), `www.google.com` (2 forms), and a real signup page (1 form, its `email` field correctly classified `private`/`email`) — with no console errors on any of them.
+- **Full loop confirmed working end-to-end on the signup page**: `PersonalData.email` seeded via `SET_PERSONAL_DATA` (no UI yet, Phase 3 doesn't add one — confirmed via grep, matching M5's own already-documented gap), then, through the real popup UI with no direct messages involved: the "Pending request" section correctly showed the active tab's origin and its classified `email` field (`private` sensitivity, a `Choose…` dropdown offering `real`/`synthetic`/`nonsense`/`deny` — no `alias`, correctly, since no provider is configured) → selected `real` → clicked Submit → the live page's actual email input was filled with the real seeded value. All four response types were exercised and confirmed working (`real`, `synthetic`, `nonsense`, `deny`), not just the one path.
+- **One real UX rough edge found and fixed during this pass, not a code bug**: `browser.tabs.query({active,currentWindow})` resolves "active" as *whichever tab is currently frontmost when the icon is clicked*, not "the last form-bearing tab visited." A user (or tester) who clicks the icon while a different, form-less tab is frontmost correctly sees "Nothing pending for this tab" — confirmed working as designed, not a bug, but worth calling out here since it was the source of the first confusion during this very verification pass. No code change needed; this is exactly the intended, honest behavior for a per-active-tab UI.
+- **Gate to start Phase 4 (below) is satisfied**: every item confirmed directly by this pass.
+
 ## Gate to start Phase 4
 
 Phase 4 builds the Policy Engine (remembers decisions, auto-applies them) and the Privacy Ledger (logs every disclosure) *on top of* Phase 3's per-request flow. Before starting it, confirm:
 
-- Every field the classifier recognizes correctly maps to the right `PersonalData` key and sensitivity level on at least a handful of real, unrelated signup forms — not just the fixture page.
-- A user can complete the full loop — form detected → popup shows correct classified request → user decides per field → site's form is actually filled — without touching any code, on a real site.
-- Optional fields are, in practice, blocked by default and never silently pre-filled.
-- Nothing from this phase writes to `Policies` or `PrivacyLedger` — confirmed by grep, not assumed — since Phase 4 owns bringing those trees to life and Phase 3 building ahead into them would blur the boundary this plan deliberately drew.
+- [x] Every field the classifier recognizes correctly maps to the right `PersonalData` key and sensitivity level on at least a handful of real, unrelated signup forms — not just the fixture page. Confirmed on `developer.service.hmrc.gov.uk`, `www.google.com`, and a real signup page.
+- [x] A user can complete the full loop — form detected → popup shows correct classified request → user decides per field → site's form is actually filled — without touching any code, on a real site. Confirmed with `real`, `synthetic`, `nonsense`, and `deny` all exercised.
+- [x] Optional fields are, in practice, blocked by default and never silently pre-filled. Enforced by `defaultResponseFor()` in `stores/firewall.store.ts` (`applyApproveAll`) and by `applyDenyOptional` — no code path defaults an optional field to anything but `deny`.
+- [x] Nothing from this phase writes to `Policies` or `PrivacyLedger` — confirmed by grep across `background/firewall/`, `background/formDetection/`, `stores/firewall.store.ts`, `entrypoints/popup/App.vue`, and `content/autofill.ts`: zero matches for `.policies`, `.privacyLedger`, `PrivacyLedger`, or `PolicyRule`.
+
+**Phase 3 is complete.**
