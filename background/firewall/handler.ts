@@ -9,17 +9,28 @@ import type {
   SubmitFieldDecisionsResponse,
 } from '../../shared/messages';
 import { normalizeOrigin } from '../../shared/origin';
-import type { PersonalData, PersonalDataFieldName, ResponseType } from '../../shared/vault-schema';
+import type {
+  PersonalData,
+  PersonalDataFieldName,
+  PolicyAction,
+  ResponseType,
+} from '../../shared/vault-schema';
 import { recordDisclosure } from '../policy/ledger';
+import { resolvePolicy } from '../policy/resolve';
 import { getSessionState } from '../session/state';
 import { getPersonalData } from '../vault/personalData/storage';
 import { readVaultIndex } from '../vault/storage';
 import { availableResponses } from './responseAvailability';
 import { generateResponseValue } from './responseGenerator';
 
-async function isAliasProviderConfigured(): Promise<boolean> {
+async function loadPolicyContext() {
   const index = await readVaultIndex();
-  return index.aliasProviderConfig.provider !== 'none';
+  const normalizedHighTrust = new Set(index.highTrustOrigins.map((o) => normalizeOrigin(o)));
+  return {
+    policies: index.policies,
+    aliasProviderConfigured: index.aliasProviderConfig.provider !== 'none',
+    isHighTrustOrigin: (origin: string) => normalizedHighTrust.has(normalizeOrigin(origin)),
+  };
 }
 
 // One entry per distinct fieldType actually present in `forms` -- two
@@ -45,6 +56,36 @@ function computeAvailableResponses(
   return result;
 }
 
+// Same one-entry-per-distinct-fieldType convention as
+// computeAvailableResponses above -- a known simplification: two fields
+// sharing a fieldType but differing apparentlyRequired within the SAME
+// form would share whichever's resolution came first. Rare in practice
+// (two recognized fields of the same type on one form), and the
+// AUTOMATIC path (background/policy/autoApply.ts) resolves each field
+// instance independently, so this only affects the popup's pre-fill
+// display, never an actual disclosure decision.
+function computeResolvedActions(
+  origin: string,
+  forms: ClassifiedForm[],
+  policyContext: Awaited<ReturnType<typeof loadPolicyContext>>,
+): Partial<Record<PersonalDataFieldName, PolicyAction>> {
+  const result: Partial<Record<PersonalDataFieldName, PolicyAction>> = {};
+  for (const form of forms) {
+    for (const field of form.fields) {
+      if (!field.fieldType || result[field.fieldType]) continue;
+      result[field.fieldType] = resolvePolicy(
+        origin,
+        field.fieldType,
+        policyContext.policies,
+        policyContext.isHighTrustOrigin(origin),
+        policyContext.aliasProviderConfigured,
+        field.apparentlyRequired,
+      );
+    }
+  }
+  return result;
+}
+
 // Requires the vault to be unlocked -- getPersonalData()/readVaultIndex()
 // both throw VaultLockedError otherwise, surfaced to the popup as a normal
 // {ok:false} response. There's nothing meaningful this UI can show without
@@ -57,18 +98,16 @@ export async function handleGetPendingRequest(
   const record = state.originForms[normalizeOrigin(message.payload.origin)];
   if (!record) return null;
 
-  const [personalData, aliasProviderConfigured] = await Promise.all([
-    getPersonalData(),
-    isAliasProviderConfigured(),
-  ]);
+  const [personalData, policyContext] = await Promise.all([getPersonalData(), loadPolicyContext()]);
 
   return {
     forms: record.forms,
     availableResponses: computeAvailableResponses(
       record.forms,
       personalData,
-      aliasProviderConfigured,
+      policyContext.aliasProviderConfigured,
     ),
+    resolvedActions: computeResolvedActions(message.payload.origin, record.forms, policyContext),
   };
 }
 
@@ -106,10 +145,8 @@ export async function handleSubmitFieldDecisions(
     throw new Error(`No pending request found for origin "${origin}", formIndex ${formIndex}`);
   }
 
-  const [personalData, aliasProviderConfigured] = await Promise.all([
-    getPersonalData(),
-    isAliasProviderConfigured(),
-  ]);
+  const [personalData, policyContext] = await Promise.all([getPersonalData(), loadPolicyContext()]);
+  const aliasProviderConfigured = policyContext.aliasProviderConfigured;
 
   const resolvedValues: Record<string, string> = {};
   const requestedFields: PersonalDataFieldName[] = [];

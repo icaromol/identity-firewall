@@ -39,6 +39,18 @@ describe('computeAutoApply', () => {
     expect(result.askCount).toBe(1);
   });
 
+  it('an apparently-optional recognized field with no policy is fully auto-denied, not asked', () => {
+    // name's fieldType baseline is 'ask', but "optional fields are blocked
+    // by default" wins when the field instance itself is optional.
+    const result = computeAutoApply(
+      'https://example.com',
+      form([field('name', { required: false, apparentlyRequired: false })]),
+      baseContext,
+    );
+    expect(result.fullyResolved).toBe(true);
+    expect(result.deniedFields).toEqual(['name']);
+  });
+
   it('is not fullyResolved when a form has no recognized fields at all', () => {
     const result = computeAutoApply(
       'https://example.com',

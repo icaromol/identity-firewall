@@ -21,7 +21,6 @@ import { defineStore } from 'pinia';
 import { browser } from 'wxt/browser';
 import { getFieldKey } from '../shared/fieldKey';
 import type {
-  ClassifiedField,
   ClassifiedForm,
   GetPendingRequestMessage,
   MessageResponse,
@@ -29,24 +28,10 @@ import type {
   SubmitFieldDecisionsMessage,
   SubmitFieldDecisionsResponse,
 } from '../shared/messages';
-import type { PersonalDataFieldName, ResponseType } from '../shared/vault-schema';
+import type { PersonalDataFieldName, PolicyAction, ResponseType } from '../shared/vault-schema';
 
 function compoundKey(formIndex: number, fieldKey: string): string {
   return `${formIndex}:${fieldKey}`;
-}
-
-function defaultResponseFor(
-  field: ClassifiedField,
-  availableForType: ResponseType[] | undefined,
-): ResponseType | null {
-  if (!field.fieldType || !availableForType) return null;
-  // Optional fields are blocked by default regardless of what data is on
-  // file -- data-model.md's explicit rule, not a hedge.
-  if (!field.apparentlyRequired) return 'deny';
-  // Required: disclose the real value if there is one, otherwise there's
-  // nothing honest to auto-fill -- the user can still manually pick
-  // Synthetic/Nonsense instead.
-  return availableForType.includes('real') ? 'real' : 'deny';
 }
 
 export interface FirewallStoreState {
@@ -54,6 +39,10 @@ export interface FirewallStoreState {
   tabId: number | null;
   forms: ClassifiedForm[];
   availableResponses: Partial<Record<PersonalDataFieldName, ResponseType[]>>;
+  // Phase 4 -- the Policy Engine's resolved action per fieldType, computed
+  // server-side by background/firewall/handler.ts's handleGetPendingRequest
+  // using the exact same resolvePolicy logic the automatic path uses.
+  resolvedActions: Partial<Record<PersonalDataFieldName, PolicyAction>>;
   decisions: Record<string, ResponseType>; // keyed by compoundKey()
   status: 'idle' | 'loading' | 'loaded' | 'error';
   error: string | null;
@@ -71,6 +60,7 @@ export const useFirewallStore = defineStore('firewall', {
     tabId: null,
     forms: [],
     availableResponses: {},
+    resolvedActions: {},
     decisions: {},
     status: 'idle',
     error: null,
@@ -103,6 +93,22 @@ export const useFirewallStore = defineStore('firewall', {
         if (response.ok) {
           this.forms = response.data?.forms ?? [];
           this.availableResponses = response.data?.availableResponses ?? {};
+          this.resolvedActions = response.data?.resolvedActions ?? {};
+          this.decisions = {};
+          // Pre-fill every field whose Policy Engine resolution is
+          // anything but 'ask' -- "only asks what falls outside the
+          // rules" (privacy-model.md). A field resolving to 'ask' is left
+          // blank, needing the user's own choice, exactly as Phase 3
+          // always worked before any policy existed.
+          for (const form of this.forms) {
+            form.fields.forEach((field, index) => {
+              if (!field.fieldType) return;
+              const resolved = this.resolvedActions[field.fieldType];
+              if (resolved && resolved !== 'ask') {
+                this.decisions[compoundKey(form.formIndex, getFieldKey(field, index))] = resolved;
+              }
+            });
+          }
           this.status = 'loaded';
         } else {
           this.error = response.error;
@@ -122,26 +128,13 @@ export const useFirewallStore = defineStore('firewall', {
       this.decisions[compoundKey(formIndex, fieldKey)] = responseType;
     },
 
-    // "Approve all" from privacy-model.md's mockup: required fields with a
-    // real value on file get Real, everything else (optional fields, and
-    // required fields with nothing on file) gets Deny.
-    applyApproveAll(): void {
-      for (const form of this.forms) {
-        form.fields.forEach((field, index) => {
-          if (!field.fieldType) return;
-          const defaultResponse = defaultResponseFor(
-            field,
-            this.availableResponses[field.fieldType],
-          );
-          if (defaultResponse) {
-            this.setDecision(form.formIndex, getFieldKey(field, index), defaultResponse);
-          }
-        });
-      }
-    },
-
-    // Leaves required fields exactly as they are -- only touches fields
-    // apparentlyRequired === false.
+    // A manual quick-action for the fields the Policy Engine itself left
+    // as 'ask' -- most apparently-optional fields never reach here at all
+    // (resolvePolicy already defaults an optional field with no explicit
+    // rule to 'deny'), but an explicit stored rule can still leave one at
+    // 'ask' on purpose, and this lets the user clear those in one click
+    // rather than one at a time. Leaves required fields exactly as they
+    // are -- only touches fields apparentlyRequired === false.
     applyDenyOptional(): void {
       for (const form of this.forms) {
         form.fields.forEach((field, index) => {

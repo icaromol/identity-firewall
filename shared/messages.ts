@@ -15,6 +15,7 @@ import type {
   CredentialRecord,
   PersonalData,
   PersonalDataFieldName,
+  PolicyAction,
   PolicyRule,
   ResponseType,
   ServiceIdentityMeta,
@@ -347,6 +348,14 @@ export interface OriginSummary {
 export interface PendingRequest {
   forms: ClassifiedForm[];
   availableResponses: Partial<Record<PersonalDataFieldName, ResponseType[]>>;
+  // Phase 4 -- the Policy Engine's resolved action per fieldType, computed
+  // server-side the same way background/policy/autoApply.ts's own
+  // automatic path resolves each field, so the popup can pre-fill a
+  // decision without re-implementing resolvePolicy's logic itself. A
+  // fieldType resolving to 'ask' here is intentionally left out of
+  // decisions -- that's the whole point of "only asks what falls outside
+  // the rules."
+  resolvedActions: Partial<Record<PersonalDataFieldName, PolicyAction>>;
 }
 export type GetPendingRequestResponse = PendingRequest | null;
 

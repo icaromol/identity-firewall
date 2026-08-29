@@ -153,15 +153,12 @@ function submitRestoreWithPassphrase() {
         Nothing pending for this tab.
       </p>
 
+      <!-- No "Approve all" button -- Phase 4's Policy Engine pre-fills
+           every field it can resolve automatically the moment this list
+           loads (fetchPendingRequest); only fields the engine itself left
+           at 'ask' show a blank "Choose…" picker below. -->
       <div v-else class="mt-2 space-y-4">
         <div class="flex gap-2">
-          <button
-            type="button"
-            class="rounded border border-neutral-700 px-2 py-1 text-xs text-neutral-300"
-            @click="firewall.applyApproveAll()"
-          >
-            Approve all
-          </button>
           <button
             type="button"
             class="rounded border border-neutral-700 px-2 py-1 text-xs text-neutral-300"

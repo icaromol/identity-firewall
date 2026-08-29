@@ -74,4 +74,24 @@ describe('resolvePolicy', () => {
     ];
     expect(resolvePolicy('https://example.com', 'nationalId', policies, false, false)).toBe('deny');
   });
+
+  it('an apparently-optional field with no matching rule defaults to "deny", not the fieldType baseline', () => {
+    // name's baseline (PERSONAL_DATA_FIELD_DEFAULT_ACTION) is 'ask' -- but
+    // "optional fields are blocked by default" (data-model.md) takes
+    // priority when nothing more specific has been set for this field.
+    expect(resolvePolicy('https://example.com', 'name', [], false, false, false)).toBe('deny');
+  });
+
+  it('defaults apparentlyRequired to true when the caller omits it, preserving the fieldType baseline', () => {
+    expect(resolvePolicy('https://example.com', 'name', [], false, false)).toBe('ask');
+  });
+
+  it('an explicit stored rule still applies to an apparently-optional field, overriding the optional-blocks default', () => {
+    const policies: PolicyRule[] = [
+      { scope: { kind: 'global' }, fieldType: 'name', action: 'real' },
+    ];
+    expect(resolvePolicy('https://example.com', 'name', policies, false, false, false)).toBe(
+      'real',
+    );
+  });
 });

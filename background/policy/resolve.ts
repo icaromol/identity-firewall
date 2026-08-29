@@ -18,6 +18,15 @@ export function resolvePolicy(
   policies: PolicyRule[],
   isHighTrustOrigin: boolean,
   aliasProviderConfigured: boolean,
+  // Whether THIS specific field instance appeared apparently-required on
+  // its form -- distinct from fieldType's own sensitivity. Only affects
+  // the no-matching-rule fallback (below): an explicit stored PolicyRule
+  // (global or origin) always wins regardless, since setting one is
+  // itself the user's conscious choice to auto-decide even an optional
+  // field. Defaults to true (the safer assumption when a caller doesn't
+  // have this information) so omitting it never accidentally UNBLOCKS an
+  // optional field.
+  apparentlyRequired = true,
 ): PolicyAction {
   // Government/financial safe mode always wins -- overrides even an
   // explicit stored 'real'/'alias'/etc. rule for that origin, never the
@@ -39,6 +48,14 @@ export function resolvePolicy(
     action = originRule.action;
   } else if (globalRule) {
     action = globalRule.action;
+  } else if (!apparentlyRequired) {
+    // No explicit rule exists for this field, and it's apparently
+    // optional -- data-model.md/privacy-model.md's own rule ("optional
+    // fields are blocked by default") takes priority over
+    // PERSONAL_DATA_FIELD_DEFAULT_ACTION's blanket per-fieldType baseline,
+    // which knows nothing about this specific field instance's
+    // required/optional status.
+    action = 'deny';
   } else {
     const baseline = PERSONAL_DATA_FIELD_DEFAULT_ACTION[fieldType];
     // email's baseline is 'ask' specifically because no provider is

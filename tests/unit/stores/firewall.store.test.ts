@@ -85,33 +85,39 @@ describe('useFirewallStore', () => {
     expect(store.status).toBe('error');
   });
 
-  it('applyApproveAll sets Real for a required field with a real value available, Deny for the optional one', async () => {
+  it('pre-fills a decision from resolvedActions when the Policy Engine resolves a field automatically', async () => {
     mockActiveTab();
     vi.spyOn(fakeBrowser.runtime, 'sendMessage').mockResolvedValueOnce({
       ok: true,
-      data: { forms: sampleForms, availableResponses: { email: ['real', 'synthetic', 'deny'] } },
+      data: {
+        forms: sampleForms,
+        availableResponses: { email: ['real', 'synthetic', 'deny'] },
+        resolvedActions: { email: 'real' },
+      },
     } as never);
 
     const store = useFirewallStore();
     await store.fetchPendingRequest();
-    store.applyApproveAll();
 
     expect(store.getDecision(0, emailKey)).toBe('real');
     expect(store.getDecision(0, newsletterKey)).toBeUndefined(); // fieldType null -- untouched
   });
 
-  it('applyApproveAll defaults a required field with no real value on file to Deny', async () => {
+  it('leaves a field blank (no pre-filled decision) when the Policy Engine resolves it to "ask"', async () => {
     mockActiveTab();
     vi.spyOn(fakeBrowser.runtime, 'sendMessage').mockResolvedValueOnce({
       ok: true,
-      data: { forms: sampleForms, availableResponses: { email: ['synthetic', 'deny'] } }, // no 'real'
+      data: {
+        forms: sampleForms,
+        availableResponses: { email: ['real', 'synthetic', 'deny'] },
+        resolvedActions: { email: 'ask' },
+      },
     } as never);
 
     const store = useFirewallStore();
     await store.fetchPendingRequest();
-    store.applyApproveAll();
 
-    expect(store.getDecision(0, emailKey)).toBe('deny');
+    expect(store.getDecision(0, emailKey)).toBeUndefined();
   });
 
   it('applyDenyOptional only touches non-required fields', async () => {
