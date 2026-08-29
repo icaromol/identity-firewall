@@ -214,7 +214,9 @@ function submitRestoreWithPassphrase() {
           >
             Submit
           </button>
-          <p v-if="firewall.submitError" class="text-xs text-red-400">{{ firewall.submitError }}</p>
+          <p v-if="firewall.submitErrors[form.formIndex]" class="text-xs text-red-400">
+            {{ firewall.submitErrors[form.formIndex] }}
+          </p>
         </div>
       </div>
     </section>

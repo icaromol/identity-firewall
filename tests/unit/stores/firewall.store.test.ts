@@ -1,9 +1,17 @@
 import { createPinia, setActivePinia } from 'pinia';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fakeBrowser } from 'wxt/testing/fake-browser';
+import { getFieldKey } from '../../../shared/fieldKey';
+import type { ClassifiedForm } from '../../../shared/messages';
 import { useFirewallStore } from '../../../stores/firewall.store';
 
 const activeTab = { id: 7, url: 'https://example.com/signup' };
+
+// getFieldKey always index-prefixes (see shared/fieldKey.ts's own comment,
+// added by a /code-review finding on same-named fields colliding) --
+// sampleForms below has 'email' at index 0, 'newsletter' at index 1.
+const emailKey = getFieldKey({ name: 'email', id: null }, 0);
+const newsletterKey = getFieldKey({ name: 'newsletter', id: null }, 1);
 
 function mockActiveTab() {
   // fakeBrowser.tabs.query's real in-memory implementation only knows
@@ -88,8 +96,8 @@ describe('useFirewallStore', () => {
     await store.fetchPendingRequest();
     store.applyApproveAll();
 
-    expect(store.getDecision(0, 'email')).toBe('real');
-    expect(store.getDecision(0, 'newsletter')).toBeUndefined(); // fieldType null -- untouched
+    expect(store.getDecision(0, emailKey)).toBe('real');
+    expect(store.getDecision(0, newsletterKey)).toBeUndefined(); // fieldType null -- untouched
   });
 
   it('applyApproveAll defaults a required field with no real value on file to Deny', async () => {
@@ -103,7 +111,7 @@ describe('useFirewallStore', () => {
     await store.fetchPendingRequest();
     store.applyApproveAll();
 
-    expect(store.getDecision(0, 'email')).toBe('deny');
+    expect(store.getDecision(0, emailKey)).toBe('deny');
   });
 
   it('applyDenyOptional only touches non-required fields', async () => {
@@ -148,7 +156,7 @@ describe('useFirewallStore', () => {
     await store.fetchPendingRequest();
     store.applyDenyOptional();
 
-    expect(store.getDecision(0, 'email')).toBe('deny');
+    expect(store.getDecision(0, emailKey)).toBe('deny');
   });
 
   it('submitForm sends only the decisions actually set for that form, scoped by tabId/origin', async () => {
@@ -160,11 +168,12 @@ describe('useFirewallStore', () => {
 
     const store = useFirewallStore();
     await store.fetchPendingRequest();
-    store.setDecision(0, 'email', 'real');
+    store.setDecision(0, emailKey, 'real');
 
-    const submitSpy = vi
-      .spyOn(fakeBrowser.runtime, 'sendMessage')
-      .mockResolvedValueOnce({ ok: true, data: { resolvedValues: { email: 'a@b.com' } } } as never);
+    const submitSpy = vi.spyOn(fakeBrowser.runtime, 'sendMessage').mockResolvedValueOnce({
+      ok: true,
+      data: { resolvedValues: { [emailKey]: 'a@b.com' } },
+    } as never);
 
     await store.submitForm(0);
 
@@ -174,10 +183,10 @@ describe('useFirewallStore', () => {
         origin: 'https://example.com',
         tabId: 7,
         formIndex: 0,
-        decisions: { email: 'real' },
+        decisions: { [emailKey]: 'real' },
       },
     });
-    expect(store.submitError).toBeNull();
+    expect(store.submitErrors[0]).toBeUndefined();
   });
 
   it('submitForm records a handler-level error without throwing', async () => {
@@ -189,7 +198,7 @@ describe('useFirewallStore', () => {
 
     const store = useFirewallStore();
     await store.fetchPendingRequest();
-    store.setDecision(0, 'email', 'real');
+    store.setDecision(0, emailKey, 'real');
 
     vi.spyOn(fakeBrowser.runtime, 'sendMessage').mockResolvedValueOnce({
       ok: false,
@@ -198,6 +207,31 @@ describe('useFirewallStore', () => {
 
     await store.submitForm(0);
 
-    expect(store.submitError).toBe('boom');
+    expect(store.submitErrors[0]).toBe('boom');
+  });
+
+  it('scopes a submit error to the form that actually failed, not every pending form', async () => {
+    const twoForms = [
+      sampleForms[0] as ClassifiedForm,
+      { formIndex: 1, action: null, method: null, fields: [] } as ClassifiedForm,
+    ];
+    mockActiveTab();
+    vi.spyOn(fakeBrowser.runtime, 'sendMessage').mockResolvedValueOnce({
+      ok: true,
+      data: { forms: twoForms, availableResponses: { email: ['real', 'deny'] } },
+    } as never);
+
+    const store = useFirewallStore();
+    await store.fetchPendingRequest();
+    store.setDecision(0, emailKey, 'real');
+
+    vi.spyOn(fakeBrowser.runtime, 'sendMessage').mockResolvedValueOnce({
+      ok: false,
+      error: 'form 0 failed',
+    } as never);
+    await store.submitForm(0);
+
+    expect(store.submitErrors[0]).toBe('form 0 failed');
+    expect(store.submitErrors[1]).toBeUndefined();
   });
 });

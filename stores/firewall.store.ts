@@ -59,7 +59,11 @@ export interface FirewallStoreState {
   status: 'idle' | 'loading' | 'loaded' | 'error';
   error: string | null;
   submittingFormIndex: number | null;
-  submitError: string | null;
+  // Keyed by formIndex, not a single shared field -- a /code-review
+  // finding: a page can have more than one pending form, and a single
+  // store-wide submitError would render the same error under every form's
+  // card in the template even though only one of them actually failed.
+  submitErrors: Record<number, string>;
 }
 
 export const useFirewallStore = defineStore('firewall', {
@@ -72,7 +76,7 @@ export const useFirewallStore = defineStore('firewall', {
     status: 'idle',
     error: null,
     submittingFormIndex: null,
-    submitError: null,
+    submitErrors: {},
   }),
   actions: {
     async fetchPendingRequest(): Promise<void> {
@@ -154,7 +158,7 @@ export const useFirewallStore = defineStore('firewall', {
       if (!form || this.origin === null || this.tabId === null) return;
 
       this.submittingFormIndex = formIndex;
-      this.submitError = null;
+      delete this.submitErrors[formIndex];
 
       const decisions: Record<string, ResponseType> = {};
       form.fields.forEach((field, index) => {
@@ -171,9 +175,9 @@ export const useFirewallStore = defineStore('firewall', {
       try {
         const response: MessageResponse<SubmitFieldDecisionsResponse> =
           await browser.runtime.sendMessage(message);
-        if (!response.ok) this.submitError = response.error;
+        if (!response.ok) this.submitErrors[formIndex] = response.error;
       } catch (err) {
-        this.submitError = err instanceof Error ? err.message : String(err);
+        this.submitErrors[formIndex] = err instanceof Error ? err.message : String(err);
       } finally {
         this.submittingFormIndex = null;
       }

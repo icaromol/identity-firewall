@@ -23,6 +23,12 @@ const passphraseInput: UnlockInput = {
 // tests/unit/background/formDetection/handler.test.ts) is irrelevant here.
 const noTabCtx = { sender: {} } as Parameters<typeof handleFormDetected>[1];
 
+// shared/fieldKey.ts's getFieldKey() always index-prefixes its key
+// ('0:email' for the first field, not bare 'email') so two same-named
+// fields in one form can never collide -- every form built by
+// detectEmailForm() below has exactly one field, at index 0.
+const EMAIL_FIELD_KEY = '0:email';
+
 async function detectEmailForm(origin: string) {
   const message: FormDetectedMessage = {
     type: 'FORM_DETECTED',
@@ -117,6 +123,16 @@ describe('handleSubmitFieldDecisions', () => {
   beforeEach(async () => {
     fakeBrowser.reset();
     await createRootIdentity(passphraseInput);
+    // fakeBrowser.tabs.get resolves to `undefined` for any id it doesn't
+    // know about (no in-memory tab was ever created) rather than throwing
+    // the way real chrome.tabs.get does for a closed tab -- mocked here so
+    // every test in this block gets a tab whose url matches the origin
+    // its own FORM_DETECTED call used, confirming the new tab-origin
+    // re-check (a /code-review finding) doesn't mask what each test is
+    // actually trying to verify.
+    vi.spyOn(fakeBrowser.tabs, 'get').mockResolvedValue({
+      url: 'https://example.com/signup',
+    } as never);
   });
 
   it('resolves a Real decision from PersonalData and relays AUTOFILL_FIELDS to the given tab', async () => {
@@ -135,15 +151,15 @@ describe('handleSubmitFieldDecisions', () => {
         origin: 'https://example.com',
         tabId: 42,
         formIndex: 0,
-        decisions: { email: 'real' },
+        decisions: { [EMAIL_FIELD_KEY]: 'real' },
       },
     };
     const result = await handleSubmitFieldDecisions(message);
 
-    expect(result.resolvedValues).toEqual({ email: 'user@example.com' });
+    expect(result.resolvedValues).toEqual({ [EMAIL_FIELD_KEY]: 'user@example.com' });
     expect(sendMessageSpy).toHaveBeenCalledWith(42, {
       type: 'AUTOFILL_FIELDS',
-      payload: { formIndex: 0, values: { email: 'user@example.com' } },
+      payload: { formIndex: 0, values: { [EMAIL_FIELD_KEY]: 'user@example.com' } },
     });
   });
 
@@ -157,7 +173,7 @@ describe('handleSubmitFieldDecisions', () => {
         origin: 'https://example.com',
         tabId: 1,
         formIndex: 0,
-        decisions: { email: 'deny' },
+        decisions: { [EMAIL_FIELD_KEY]: 'deny' },
       },
     });
 
@@ -174,7 +190,7 @@ describe('handleSubmitFieldDecisions', () => {
           origin: 'https://example.com',
           tabId: 1,
           formIndex: 0,
-          decisions: { email: 'real' }, // real is not allowed -- no value on file
+          decisions: { [EMAIL_FIELD_KEY]: 'real' }, // real is not allowed -- no value on file
         },
       }),
     ).rejects.toThrow();
@@ -189,5 +205,46 @@ describe('handleSubmitFieldDecisions', () => {
         payload: { origin: 'https://example.com', tabId: 1, formIndex: 99, decisions: {} },
       }),
     ).rejects.toThrow();
+  });
+
+  it('refuses to autofill when the tab has navigated away from the origin the decisions were made for', async () => {
+    await detectEmailForm('https://example.com');
+    await setPersonalData({ email: 'user@example.com' });
+
+    // The tab is now showing a DIFFERENT origin than the one this
+    // SUBMIT_FIELD_DECISIONS call claims -- simulates the popup staying
+    // open across a navigation/redirect after origin/tabId were cached.
+    vi.spyOn(fakeBrowser.tabs, 'get').mockResolvedValue({
+      url: 'https://attacker.example/',
+    } as never);
+
+    await expect(
+      handleSubmitFieldDecisions({
+        type: 'SUBMIT_FIELD_DECISIONS',
+        payload: {
+          origin: 'https://example.com',
+          tabId: 1,
+          formIndex: 0,
+          decisions: { [EMAIL_FIELD_KEY]: 'real' },
+        },
+      }),
+    ).rejects.toThrow(/no longer showing origin/);
+  });
+
+  it('refuses to autofill when the tab no longer exists', async () => {
+    await detectEmailForm('https://example.com');
+    vi.spyOn(fakeBrowser.tabs, 'get').mockResolvedValue(undefined as never);
+
+    await expect(
+      handleSubmitFieldDecisions({
+        type: 'SUBMIT_FIELD_DECISIONS',
+        payload: {
+          origin: 'https://example.com',
+          tabId: 1,
+          formIndex: 0,
+          decisions: { [EMAIL_FIELD_KEY]: 'deny' },
+        },
+      }),
+    ).rejects.toThrow(/no longer showing origin/);
   });
 });

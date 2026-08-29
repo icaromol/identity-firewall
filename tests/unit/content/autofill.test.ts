@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it } from 'vitest';
 import { applyAutofill } from '../../../content/autofill';
+import { getFieldKey } from '../../../shared/fieldKey';
 import type { AutofillFieldsMessage } from '../../../shared/messages';
 
 beforeEach(() => {
@@ -28,7 +29,8 @@ describe('applyAutofill', () => {
       changeEventFired = true;
     });
 
-    applyAutofill(document, message(0, { email: 'user@example.com' }));
+    const key = getFieldKey({ name: 'email', id: null }, 0);
+    applyAutofill(document, message(0, { [key]: 'user@example.com' }));
 
     expect(input.value).toBe('user@example.com');
     expect(inputEventFired).toBe(true);
@@ -41,18 +43,38 @@ describe('applyAutofill', () => {
         <input type="text" id="full-name" />
       </form>
     `;
-    applyAutofill(document, message(0, { 'full-name': 'Ícaro' }));
+    const key = getFieldKey({ name: null, id: 'full-name' }, 0);
+    applyAutofill(document, message(0, { [key]: 'Ícaro' }));
     expect((document.getElementById('full-name') as HTMLInputElement).value).toBe('Ícaro');
   });
 
-  it('falls back to positional key when neither name nor id is present', () => {
+  it('falls back to a plain positional key when neither name nor id is present', () => {
     document.body.innerHTML = `
       <form>
         <input type="text" />
       </form>
     `;
-    applyAutofill(document, message(0, { '#0': 'value-by-position' }));
+    const key = getFieldKey({ name: null, id: null }, 0);
+    applyAutofill(document, message(0, { [key]: 'value-by-position' }));
     expect((document.querySelector('input') as HTMLInputElement).value).toBe('value-by-position');
+  });
+
+  it('index-prefixes the key so two same-named fields in one form never collide', () => {
+    document.body.innerHTML = `
+      <form>
+        <input type="text" name="address" />
+        <input type="text" name="address" />
+      </form>
+    `;
+    const firstKey = getFieldKey({ name: 'address', id: null }, 0);
+    const secondKey = getFieldKey({ name: 'address', id: null }, 1);
+    expect(firstKey).not.toBe(secondKey);
+
+    applyAutofill(document, message(0, { [firstKey]: 'billing', [secondKey]: 'shipping' }));
+
+    const inputs = document.querySelectorAll('[name=address]');
+    expect((inputs[0] as HTMLInputElement).value).toBe('billing');
+    expect((inputs[1] as HTMLInputElement).value).toBe('shipping');
   });
 
   it('leaves a field untouched when its key has no matching value', () => {
@@ -62,7 +84,8 @@ describe('applyAutofill', () => {
         <input type="tel" name="phone" />
       </form>
     `;
-    applyAutofill(document, message(0, { email: 'new@example.com' }));
+    const emailKey = getFieldKey({ name: 'email', id: null }, 0);
+    applyAutofill(document, message(0, { [emailKey]: 'new@example.com' }));
 
     expect((document.querySelector('[name=email]') as HTMLInputElement).value).toBe(
       'new@example.com',
@@ -72,7 +95,8 @@ describe('applyAutofill', () => {
 
   it('does nothing when the formIndex no longer exists on the page', () => {
     document.body.innerHTML = '<div>no forms here</div>';
-    expect(() => applyAutofill(document, message(0, { email: 'x@example.com' }))).not.toThrow();
+    const key = getFieldKey({ name: 'email', id: null }, 0);
+    expect(() => applyAutofill(document, message(0, { [key]: 'x@example.com' }))).not.toThrow();
   });
 
   it('fills a textarea and select using their own native setters', () => {
@@ -85,7 +109,9 @@ describe('applyAutofill', () => {
         </select>
       </form>
     `;
-    applyAutofill(document, message(0, { bio: 'hello', country: 'br' }));
+    const bioKey = getFieldKey({ name: 'bio', id: null }, 0);
+    const countryKey = getFieldKey({ name: 'country', id: null }, 1);
+    applyAutofill(document, message(0, { [bioKey]: 'hello', [countryKey]: 'br' }));
 
     expect((document.querySelector('textarea') as HTMLTextAreaElement).value).toBe('hello');
     expect((document.querySelector('select') as HTMLSelectElement).value).toBe('br');
@@ -96,7 +122,8 @@ describe('applyAutofill', () => {
       <form><input type="text" name="a" /></form>
       <form><input type="text" name="a" /></form>
     `;
-    applyAutofill(document, message(1, { a: 'second-form-value' }));
+    const key = getFieldKey({ name: 'a', id: null }, 0);
+    applyAutofill(document, message(1, { [key]: 'second-form-value' }));
 
     const inputs = document.querySelectorAll('[name=a]');
     expect((inputs[0] as HTMLInputElement).value).toBe('');
