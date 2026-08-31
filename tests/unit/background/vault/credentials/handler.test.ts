@@ -1,9 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fakeBrowser } from 'wxt/testing/fake-browser';
+import { recordFormDetection } from '../../../../../background/session/state';
 import {
   handleConfirmPendingCredential,
   handleDeleteCredential,
   handleDiscardPendingCredential,
+  handleFillCredential,
   handleGetCredential,
   handleGetPendingCredential,
   handleSaveCredential,
@@ -14,6 +16,7 @@ import type {
   ConfirmPendingCredentialMessage,
   DeleteCredentialMessage,
   DiscardPendingCredentialMessage,
+  FillCredentialMessage,
   GetCredentialMessage,
   GetPendingCredentialMessage,
   SaveCredentialMessage,
@@ -217,5 +220,168 @@ describe('pending credential handlers (Phase 5 M4)', () => {
       payload: { origin: 'https://example.com' },
     };
     expect(await handleGetCredential(getMessage)).toEqual([]);
+  });
+});
+
+describe('handleFillCredential (Phase 5 M5)', () => {
+  beforeEach(async () => {
+    fakeBrowser.reset();
+    vi.restoreAllMocks();
+    await createRootIdentity(passphraseInput);
+  });
+
+  const loginForm = {
+    formIndex: 0,
+    action: null,
+    method: null,
+    fields: [
+      {
+        tagName: 'input' as const,
+        type: 'email',
+        name: 'email',
+        id: null,
+        required: true,
+        autocomplete: 'username',
+        fieldType: 'email' as const,
+        sensitivity: 'private' as const,
+        apparentlyRequired: true,
+      },
+      {
+        tagName: 'input' as const,
+        type: 'password',
+        name: 'password',
+        id: null,
+        required: true,
+        autocomplete: 'current-password',
+        fieldType: null,
+        sensitivity: null,
+        apparentlyRequired: true,
+      },
+    ],
+  };
+
+  it('relays AUTOFILL_FIELDS with the credential values when a login form is on the page', async () => {
+    vi.spyOn(fakeBrowser.tabs, 'get').mockResolvedValue({
+      url: 'https://example.com/login',
+    } as never);
+    await recordFormDetection(normalizeOrigin('https://example.com'), [loginForm], 1, 0);
+    const sendMessageSpy = vi
+      .spyOn(fakeBrowser.tabs, 'sendMessage')
+      .mockResolvedValue(true as never);
+
+    const message: FillCredentialMessage = {
+      type: 'FILL_CREDENTIAL',
+      payload: {
+        origin: 'https://example.com',
+        tabId: 1,
+        credential: { kind: 'password', username: 'alice@example.com', password: 'hunter2' },
+      },
+    };
+    const result = await handleFillCredential(message);
+
+    expect(result).toEqual({ filled: true });
+    expect(sendMessageSpy).toHaveBeenCalledWith(1, {
+      type: 'AUTOFILL_FIELDS',
+      payload: {
+        formIndex: 0,
+        values: { '0:email': 'alice@example.com', '1:password': 'hunter2' },
+      },
+    });
+  });
+
+  it('returns filled: false when content/autofill.ts reports nothing was actually applied (a stale cached form)', async () => {
+    vi.spyOn(fakeBrowser.tabs, 'get').mockResolvedValue({
+      url: 'https://example.com/login',
+    } as never);
+    await recordFormDetection(normalizeOrigin('https://example.com'), [loginForm], 1, 0);
+    // The live page no longer matches the cached form (e.g. it navigated) --
+    // applyAutofill's own reply says so.
+    vi.spyOn(fakeBrowser.tabs, 'sendMessage').mockResolvedValue(false as never);
+
+    const message: FillCredentialMessage = {
+      type: 'FILL_CREDENTIAL',
+      payload: {
+        origin: 'https://example.com',
+        tabId: 1,
+        credential: { kind: 'password', username: 'alice@example.com', password: 'hunter2' },
+      },
+    };
+    expect(await handleFillCredential(message)).toEqual({ filled: false });
+  });
+
+  it('omits the identifier value when the credential has no username', async () => {
+    vi.spyOn(fakeBrowser.tabs, 'get').mockResolvedValue({
+      url: 'https://example.com/login',
+    } as never);
+    await recordFormDetection(normalizeOrigin('https://example.com'), [loginForm], 1, 0);
+    const sendMessageSpy = vi
+      .spyOn(fakeBrowser.tabs, 'sendMessage')
+      .mockResolvedValue(true as never);
+
+    const message: FillCredentialMessage = {
+      type: 'FILL_CREDENTIAL',
+      payload: {
+        origin: 'https://example.com',
+        tabId: 1,
+        credential: { kind: 'password', username: null, password: 'hunter2' },
+      },
+    };
+    await handleFillCredential(message);
+
+    expect(sendMessageSpy).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({
+        payload: expect.objectContaining({ values: { '1:password': 'hunter2' } }),
+      }),
+    );
+  });
+
+  it('returns filled: false when no password-bearing form is on the page', async () => {
+    vi.spyOn(fakeBrowser.tabs, 'get').mockResolvedValue({
+      url: 'https://example.com/',
+    } as never);
+
+    const message: FillCredentialMessage = {
+      type: 'FILL_CREDENTIAL',
+      payload: {
+        origin: 'https://example.com',
+        tabId: 1,
+        credential: { kind: 'password', username: 'alice@example.com', password: 'hunter2' },
+      },
+    };
+    expect(await handleFillCredential(message)).toEqual({ filled: false });
+  });
+
+  it('returns filled: false for a passkey credential (not fillable this way)', async () => {
+    vi.spyOn(fakeBrowser.tabs, 'get').mockResolvedValue({
+      url: 'https://example.com/login',
+    } as never);
+    await recordFormDetection(normalizeOrigin('https://example.com'), [loginForm], 1, 0);
+
+    const message: FillCredentialMessage = {
+      type: 'FILL_CREDENTIAL',
+      payload: {
+        origin: 'https://example.com',
+        tabId: 1,
+        credential: { kind: 'passkey', rpId: 'example.com', credentialId: 'abc' },
+      },
+    };
+    expect(await handleFillCredential(message)).toEqual({ filled: false });
+  });
+
+  it('refuses when the tab has navigated away from the claimed origin', async () => {
+    vi.spyOn(fakeBrowser.tabs, 'get').mockResolvedValue({
+      url: 'https://attacker.example/',
+    } as never);
+
+    const message: FillCredentialMessage = {
+      type: 'FILL_CREDENTIAL',
+      payload: {
+        origin: 'https://example.com',
+        tabId: 1,
+        credential: { kind: 'password', username: 'alice@example.com', password: 'hunter2' },
+      },
+    };
+    await expect(handleFillCredential(message)).rejects.toThrow(/no longer showing origin/);
   });
 });

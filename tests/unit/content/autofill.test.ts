@@ -99,6 +99,31 @@ describe('applyAutofill', () => {
     expect(() => applyAutofill(document, message(0, { [key]: 'x@example.com' }))).not.toThrow();
   });
 
+  it('returns true when at least one value was actually applied (Phase 5 M5 regression guard)', () => {
+    document.body.innerHTML = `
+      <form>
+        <input type="email" name="email" />
+      </form>
+    `;
+    const key = getFieldKey({ name: 'email', id: null }, 0);
+    expect(applyAutofill(document, message(0, { [key]: 'user@example.com' }))).toBe(true);
+  });
+
+  it('returns false when the formIndex does not exist', () => {
+    document.body.innerHTML = '<div>no forms here</div>';
+    const key = getFieldKey({ name: 'email', id: null }, 0);
+    expect(applyAutofill(document, message(0, { [key]: 'x@example.com' }))).toBe(false);
+  });
+
+  it('returns false when the form exists but no key matches any live field (a stale cached form)', () => {
+    document.body.innerHTML = `
+      <form>
+        <input type="email" name="email" />
+      </form>
+    `;
+    expect(applyAutofill(document, message(0, { '0:phone': '555-1234' }))).toBe(false);
+  });
+
   it('fills a textarea and select using their own native setters', () => {
     document.body.innerHTML = `
       <form>

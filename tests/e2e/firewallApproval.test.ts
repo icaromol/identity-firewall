@@ -1,5 +1,5 @@
-// Phase 3 M6 / Phase 4 M5 -- the "Pending request" and "What this site
-// knows about you" sections' error paths.
+// Phase 3 M6 / Phase 4 M5 / Phase 5 M5 -- the "Pending request", "What
+// this site knows about you", and "Saved logins" sections' error paths.
 //
 // The full detect -> classify -> approve -> autofill loop CANNOT be
 // exercised end-to-end here: both stores/firewall.store.ts and
@@ -15,14 +15,14 @@
 // M6), not something this suite asserts end-to-end.
 //
 // What CAN be verified here, and is worth a real regression test: that
-// this permission gap fails gracefully in BOTH sections -- a clear error
+// this permission gap fails gracefully in ALL THREE sections -- a clear error
 // message, not a crash or a silently blank section -- since that's
 // exactly the state Playwright itself is permanently stuck in,
 // e2e-testing it for real.
 
 import { expect, test } from './fixtures/extension';
 
-test('the Pending request and privacy-ledger sections both show a graceful error when the active tab cannot be resolved', async ({
+test('the Pending request, privacy-ledger, and saved-logins sections all show a graceful error when the active tab cannot be resolved', async ({
   context,
   extensionId,
 }) => {
@@ -34,7 +34,21 @@ test('the Pending request and privacy-ledger sections both show a graceful error
       exact: true,
     }),
   ).toBeVisible();
+
+  // Both remaining sections show the exact same bare error text -- scoped
+  // by their own section heading rather than a global getByText, which
+  // would now hit a strict-mode "resolved to N elements" violation with a
+  // third section sharing this wording (Phase 5 M5's own addition).
   await expect(
-    popup.getByText('Could not determine the active tab', { exact: true }),
+    popup
+      .locator('section')
+      .filter({ hasText: 'What this site knows about you' })
+      .getByText('Could not determine the active tab', { exact: true }),
+  ).toBeVisible();
+  await expect(
+    popup
+      .locator('section')
+      .filter({ hasText: 'Saved logins' })
+      .getByText('Could not determine the active tab', { exact: true }),
   ).toBeVisible();
 });

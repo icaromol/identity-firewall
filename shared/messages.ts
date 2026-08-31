@@ -334,6 +334,19 @@ export type ConfirmPendingCredentialMessage = z.infer<typeof ConfirmPendingCrede
 // right tab after discarding -- discarding never writes to the vault, so
 // there's no origin-mismatch risk to guard against the way CONFIRM's own
 // re-verification does.
+// --- Popup -> Background: fill a saved credential (Phase 5 M5) ---
+// Reuses AUTOFILL_FIELDS to actually write the values (background ->
+// content), the exact same relay + native-setter mechanism Phase 3
+// already proved for PersonalData fields -- no new content-script message
+// type needed. tabId travels here for the same stale-tab re-verification
+// reason SUBMIT_FIELD_DECISIONS/CONFIRM_PENDING_CREDENTIAL's own payloads
+// do.
+export const FillCredentialMessageSchema = z.object({
+  type: z.literal('FILL_CREDENTIAL'),
+  payload: z.object({ origin: z.string(), tabId: z.number(), credential: CredentialRecordSchema }),
+});
+export type FillCredentialMessage = z.infer<typeof FillCredentialMessageSchema>;
+
 export const DiscardPendingCredentialMessageSchema = z.object({
   type: z.literal('DISCARD_PENDING_CREDENTIAL'),
   payload: z.object({ origin: z.string(), tabId: z.number() }),
@@ -396,6 +409,7 @@ export const ExtensionMessageSchema = z.discriminatedUnion('type', [
   GetCredentialMessageSchema,
   SaveCredentialMessageSchema,
   DeleteCredentialMessageSchema,
+  FillCredentialMessageSchema,
   GetPendingCredentialMessageSchema,
   ConfirmPendingCredentialMessageSchema,
   DiscardPendingCredentialMessageSchema,
@@ -534,6 +548,14 @@ export interface PendingCredential {
   capturedAt: number;
 }
 export type GetPendingCredentialResponse = PendingCredential | null;
+
+// FILL_CREDENTIAL's response payload shape -- false when the current page
+// has no password-bearing form to fill into at all (a stale/closed tab,
+// or a page that navigated away from any form since it was last
+// detected), true once AUTOFILL_FIELDS was actually relayed.
+export interface FillCredentialResponse {
+  filled: boolean;
+}
 export type ConfirmPendingCredentialResponse = CredentialRecord;
 export type DiscardPendingCredentialResponse = undefined;
 

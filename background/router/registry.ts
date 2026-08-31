@@ -25,6 +25,7 @@ import {
   handleConfirmPendingCredential,
   handleDeleteCredential,
   handleDiscardPendingCredential,
+  handleFillCredential,
   handleGetCredential,
   handleGetPendingCredential,
   handleSaveCredential,
@@ -140,6 +141,10 @@ export const registry: Registry = {
   DISCARD_PENDING_CREDENTIAL: {
     capability: 'vault',
     handle: (message) => handleDiscardPendingCredential(message),
+  },
+  FILL_CREDENTIAL: {
+    capability: 'vault',
+    handle: (message) => handleFillCredential(message),
   },
   EXPORT_VAULT_BACKUP: {
     capability: 'vault',

@@ -9,6 +9,7 @@ import { defineStore } from 'pinia';
 import { browser } from 'wxt/browser';
 import type { GetPrivacyLedgerMessage, MessageResponse } from '../shared/messages';
 import type { PrivacyLedgerEntry } from '../shared/vault-schema';
+import { resolveActiveTab } from './shared/activeTab';
 
 export interface PrivacyLedgerStoreState {
   origin: string | null;
@@ -30,14 +31,8 @@ export const usePrivacyLedgerStore = defineStore('privacyLedger', {
       this.error = null;
 
       try {
-        const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
-        if (!tab?.url) {
-          this.error = 'Could not determine the active tab';
-          this.status = 'error';
-          return;
-        }
-
-        this.origin = new URL(tab.url).origin;
+        const { origin } = await resolveActiveTab();
+        this.origin = origin;
 
         const message: GetPrivacyLedgerMessage = {
           type: 'GET_PRIVACY_LEDGER',

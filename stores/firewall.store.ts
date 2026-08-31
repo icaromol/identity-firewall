@@ -31,6 +31,7 @@ import type {
   SubmitFieldDecisionsResponse,
 } from '../shared/messages';
 import type { PersonalDataFieldName, PolicyAction, ResponseType } from '../shared/vault-schema';
+import { resolveActiveTab } from './shared/activeTab';
 
 function compoundKey(formIndex: number, fieldKey: string): string {
   return `${formIndex}:${fieldKey}`;
@@ -134,15 +135,9 @@ export const useFirewallStore = defineStore('firewall', {
       this.autoFilledKeys = new Set();
 
       try {
-        const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
-        if (!tab?.url || tab.id === undefined) {
-          this.error = 'Could not determine the active tab';
-          this.status = 'error';
-          return;
-        }
-
-        this.tabId = tab.id;
-        this.origin = new URL(tab.url).origin;
+        const { tabId, origin } = await resolveActiveTab();
+        this.tabId = tabId;
+        this.origin = origin;
 
         const message: GetPendingRequestMessage = {
           type: 'GET_PENDING_REQUEST',

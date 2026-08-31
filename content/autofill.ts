@@ -48,17 +48,26 @@ function setNativeValue(
  * nothing for a formIndex that no longer exists (the tab may have
  * navigated away between the request and the response) or a key with no
  * matching live field -- there's no useful recovery action from a content
- * script here, matching entrypoints/content.ts's own established
- * fire-and-forget error-tolerance for this boundary.
+ * script here for Phase 3's own automatic/manual paths, which never check
+ * this return value. Returns whether at least one value was actually
+ * written, though, since Phase 5 M5's manual Fill action DOES need to
+ * know: without it, a stale cached formIndex/fieldKey (the page changed
+ * since detection) would silently report success with nothing actually
+ * filled (a /code-review finding).
  */
-export function applyAutofill(doc: Document, message: AutofillFieldsMessage): void {
+export function applyAutofill(doc: Document, message: AutofillFieldsMessage): boolean {
   const form = doc.forms[message.payload.formIndex];
-  if (!form) return;
+  if (!form) return false;
 
   const fields = getDetectableFields(form);
+  let appliedAny = false;
   fields.forEach((field, index) => {
     const key = getFieldKey({ name: field.name || null, id: field.id || null }, index);
     const value = message.payload.values[key];
-    if (value !== undefined) setNativeValue(field, value);
+    if (value !== undefined) {
+      setNativeValue(field, value);
+      appliedAny = true;
+    }
   });
+  return appliedAny;
 }

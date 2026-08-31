@@ -10,7 +10,10 @@
 // real user populate the values "Real" has resolved to since Phase 3.
 // Phase 5 M4 adds "Save this login?", backed by
 // stores/pendingCredential.store.ts -- a login captured on submit by the
-// content script, staged in session state until confirmed here.
+// content script, staged in session state until confirmed here. Phase 5
+// M5 adds "Saved logins", backed by stores/savedCredentials.store.ts --
+// lists what's already saved for this site, plain (no masking -- see the
+// plan's own decision), with a Fill action.
 import { computed, onMounted, reactive, ref } from 'vue';
 import { getFieldKey } from '../../shared/fieldKey';
 import type { ClassifiedField, ClassifiedForm } from '../../shared/messages';
@@ -19,6 +22,7 @@ import { useFirewallStore } from '../../stores/firewall.store';
 import { usePendingCredentialStore } from '../../stores/pendingCredential.store';
 import { usePersonalDataStore } from '../../stores/personalData.store';
 import { usePrivacyLedgerStore } from '../../stores/privacyLedger.store';
+import { useSavedCredentialsStore } from '../../stores/savedCredentials.store';
 import { useSessionStore } from '../../stores/session.store';
 import { useVaultStore } from '../../stores/vault.store';
 
@@ -28,6 +32,7 @@ const firewall = useFirewallStore();
 const privacyLedger = usePrivacyLedgerStore();
 const personalData = usePersonalDataStore();
 const pendingCredential = usePendingCredentialStore();
+const savedCredentials = useSavedCredentialsStore();
 
 // Aggregates every recorded ledger entry for this origin into the
 // per-service summary privacy-model.md's own mockup shows ("Disclosed: ✓
@@ -86,6 +91,7 @@ onMounted(() => {
     if (personalData.status === 'loaded') Object.assign(personalDataForm, personalData.data);
   });
   pendingCredential.fetchPendingCredential();
+  savedCredentials.fetchCredentials();
 });
 
 // biome-ignore lint/correctness/noUnusedVariables: called from @submit.prevent in <template> -- Biome only lints the <script> block, it can't see template usage.
@@ -348,6 +354,63 @@ function submitRestoreWithPassphrase() {
         </div>
         <p v-if="pendingCredential.actionError" class="text-xs text-red-400">
           {{ pendingCredential.actionError }}
+        </p>
+      </div>
+    </section>
+
+    <section class="mt-4 border-t border-neutral-800 pt-4">
+      <h2 class="text-xs font-semibold uppercase tracking-wide text-neutral-400">
+        Saved logins{{ savedCredentials.origin ? ` — ${savedCredentials.origin}` : '' }}
+      </h2>
+
+      <p
+        v-if="savedCredentials.status === 'idle' || savedCredentials.status === 'loading'"
+        class="mt-2 text-neutral-400"
+      >
+        Loading…
+      </p>
+
+      <p v-else-if="savedCredentials.status === 'error'" class="mt-2 text-red-400">
+        {{ savedCredentials.error }}
+      </p>
+
+      <p v-else-if="savedCredentials.credentials.length === 0" class="mt-2 text-neutral-400">
+        Nothing saved for this site yet.
+      </p>
+
+      <div v-else class="mt-2 space-y-2">
+        <ul class="space-y-2">
+          <li
+            v-for="credential in savedCredentials.credentials"
+            :key="credential.kind"
+            class="space-y-1 rounded border border-neutral-800 p-2"
+          >
+            <template v-if="credential.kind === 'password'">
+              <p class="text-neutral-300">{{ credential.username ?? '(no username)' }}</p>
+              <!-- type="text", not "password" -- decision 3 (the plan)
+                   requires this list to show what's saved plainly, no
+                   masking; that's Phase 8's job, once there's a proper
+                   in-page reveal-preview to build instead. -->
+              <input
+                :value="credential.password"
+                type="text"
+                readonly
+                class="w-full rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-neutral-100"
+              />
+              <button
+                type="button"
+                class="w-full rounded border border-neutral-700 px-3 py-1.5 text-neutral-300 disabled:opacity-50"
+                :disabled="savedCredentials.filling === credential"
+                @click="savedCredentials.fill(credential)"
+              >
+                Fill
+              </button>
+            </template>
+            <p v-else class="text-neutral-400">Passkey (not fillable this way)</p>
+          </li>
+        </ul>
+        <p v-if="savedCredentials.fillError" class="text-xs text-red-400">
+          {{ savedCredentials.fillError }}
         </p>
       </div>
     </section>

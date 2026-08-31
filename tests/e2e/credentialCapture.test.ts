@@ -31,6 +31,10 @@ declare const chrome: {
       message: unknown,
     ) => Promise<{ ok: boolean; data?: T; error?: string }>;
   };
+  tabs: {
+    getCurrent: () => Promise<{ openerTabId?: number }>;
+    sendMessage: <T = unknown>(tabId: number, message: unknown) => Promise<T>;
+  };
 };
 
 let site: FixtureServer;
@@ -78,6 +82,49 @@ test('a real form submit is captured and staged, reachable via GET_PENDING_CREDE
       ),
     )
     .toMatchObject({ ok: true, data: { identifier: 'alice@example.com', password: 'hunter2' } });
+});
+
+test('AUTOFILL_FIELDS replies with whether it actually wrote anything (Phase 5 M5 /code-review fix)', async ({
+  context,
+  extensionId,
+}) => {
+  const page = await context.newPage();
+  await page.goto(site.origin);
+
+  const popup = await context.newPage();
+  await popup.goto(`chrome-extension://${extensionId}/popup.html`);
+
+  // Same technique credentialCapture's other test uses to find `page`'s
+  // real tabId without any tabs permission -- see that test's own comment.
+  const tabId = await popup.evaluate(async () => {
+    const self = await chrome.tabs.getCurrent();
+    return self.openerTabId;
+  });
+
+  // A real match -- the fixture's email field is index 0, name="email"
+  // (see tests/e2e/fixtures/login-form.html), so its key is "0:email"
+  // (shared/fieldKey.ts's own index-prefixed convention).
+  const applied = await popup.evaluate(
+    (id) =>
+      chrome.tabs.sendMessage<boolean>(id as number, {
+        type: 'AUTOFILL_FIELDS',
+        payload: { formIndex: 0, values: { '0:email': 'alice@example.com' } },
+      }),
+    tabId,
+  );
+  expect(applied).toBe(true);
+  await expect(page.locator('input[type=email]')).toHaveValue('alice@example.com');
+
+  // A formIndex that doesn't exist on this page -- nothing to apply.
+  const notApplied = await popup.evaluate(
+    (id) =>
+      chrome.tabs.sendMessage<boolean>(id as number, {
+        type: 'AUTOFILL_FIELDS',
+        payload: { formIndex: 5, values: { '0:email': 'nope' } },
+      }),
+    tabId,
+  );
+  expect(notApplied).toBe(false);
 });
 
 test('a form submit with no password field is never captured', async ({ context, extensionId }) => {

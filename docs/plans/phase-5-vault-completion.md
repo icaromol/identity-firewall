@@ -71,6 +71,16 @@ Built largely as planned, with one deliberate deviation from the plan's own text
 - `content/autofill.ts` extended to also write a username/password pair into the fields M3's login-detector locates, using the same native-setter + dispatched-event mechanism already proven for `PersonalData` fields in Phase 3. No auto-submit.
 - **Acceptance**: manual — a credential saved in M4 correctly autofills a login form on a later visit to the same site.
 
+#### M5 — Implementation (as built)
+
+Built as planned — `FILL_CREDENTIAL` reuses `AUTOFILL_FIELDS` directly rather than inventing a second write-back message, and targets the first password-bearing form `detectLoginForm` recognizes regardless of its `'login'`/`'signup'` classification, since a person manually choosing to fill a specific credential is itself the confirmation that this is the right form. `/code-review` found real problems, though:
+
+- **A literal contradiction of the plan's own confirmed decision**: the saved-credential list rendered the password as `type="password"`, masking it — decision 3 explicitly requires this list to show values plainly, no masking, in this phase. Fixed to `type="text"`.
+- **`applyAutofill` had never had a reason to report anything back — until now.** Phase 3's automatic and manual auto-apply paths are both fire-and-forget by design; nothing ever checked whether a value actually landed. M5's *manual* Fill action is different: if the cached session-state form is stale (the live page changed since it was detected), silently reporting `filled: true` anyway is a real, visible lie to a person who just clicked a button expecting something to happen. Fixed by giving `applyAutofill` a `boolean` return (did it write anything at all), and — since `entrypoints/content.ts`'s `AUTOFILL_FIELDS` listener had never replied to anything before this — wiring an actual `sendResponse` reply through it for the first time, mirroring `background/router/dispatch.ts`'s own callback-plus-return-boolean convention. `handleFillCredential` now checks this reply instead of assuming success. Proven in a real browser, not just jsdom: `tests/e2e/credentialCapture.test.ts` sends a real `AUTOFILL_FIELDS` message directly and confirms the reply is `true` for a real match and `false` for a stale `formIndex`.
+- **`fill()` was missing the re-entrancy guard its own sibling actions have.** `pendingCredential.store.ts`'s `confirm()`/`discard()` both guard against an overlapping call; the newly-added `fill()` didn't, until `/code-review` caught the gap.
+- **A fourth independent copy of the same active-tab-resolution boilerplate** (`browser.tabs.query({active,currentWindow})` + null-check + `new URL(...).origin`) showed up across `firewall.store.ts`/`privacyLedger.store.ts`/`pendingCredential.store.ts`/`savedCredentials.store.ts` — the same repeated-code lesson the backend already learned once for a *different* check (`tabOriginGuard.ts`). Consolidated into `stores/shared/activeTab.ts`'s `resolveActiveTab()`, used by all four now.
+- **Invalid HTML**: a `<p>` for the fill error sat as a direct child of a `<ul>`, which only permits `<li>` children. Moved outside the list.
+
 ### M6 — Deterministic per-site synthetic values
 
 - ADR-016 written first, documenting the reuse of ADR-010's derivation pattern for this new purpose.

@@ -13,6 +13,7 @@ import type {
   PendingCredential,
 } from '../shared/messages';
 import type { CredentialRecord } from '../shared/vault-schema';
+import { resolveActiveTab } from './shared/activeTab';
 
 export interface PendingCredentialStoreState {
   origin: string | null;
@@ -48,15 +49,9 @@ export const usePendingCredentialStore = defineStore('pendingCredential', {
       this.savedCredential = null;
 
       try {
-        const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
-        if (!tab?.url || tab.id === undefined) {
-          this.error = 'Could not determine the active tab';
-          this.status = 'error';
-          return;
-        }
-
-        this.tabId = tab.id;
-        this.origin = new URL(tab.url).origin;
+        const { tabId, origin } = await resolveActiveTab();
+        this.tabId = tabId;
+        this.origin = origin;
 
         const message: GetPendingCredentialMessage = {
           type: 'GET_PENDING_CREDENTIAL',

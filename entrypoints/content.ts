@@ -18,10 +18,18 @@ export default defineContentScript({
     // this is the content script's first-ever inbound listener. Validated
     // directly against its own schema, not the full ExtensionMessage
     // union, since this listener only ever expects the one message type.
-    browser.runtime.onMessage.addListener((raw) => {
+    //
+    // Replies with applyAutofill's own boolean result via the classic
+    // sendResponse callback (mirroring background/router/dispatch.ts's own
+    // convention) -- Phase 3's automatic/manual paths never read this
+    // reply, but Phase 5 M5's manual Fill action does, since a stale
+    // cached form/field would otherwise silently report success with
+    // nothing actually filled (a /code-review finding).
+    browser.runtime.onMessage.addListener((raw, _sender, sendResponse) => {
       const parsed = AutofillFieldsMessageSchema.safeParse(raw);
-      if (!parsed.success) return; // not ours -- let another listener (if any) handle it
-      applyAutofill(document, parsed.data);
+      if (!parsed.success) return false; // not ours -- let another listener (if any) handle it
+      sendResponse(applyAutofill(document, parsed.data));
+      return true;
     });
 
     const message = buildFormDetectedMessage(document, location.href, Date.now());
