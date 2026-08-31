@@ -1,12 +1,21 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fakeBrowser } from 'wxt/testing/fake-browser';
-import { handleFormDetected } from '../../../../background/formDetection/handler';
+import {
+  handleFormDetected,
+  handleFormSubmitted,
+} from '../../../../background/formDetection/handler';
 import { setHighTrustOrigin, setPolicy } from '../../../../background/policy/storage';
 import { getSessionState } from '../../../../background/session/state';
+import { getPendingCredential } from '../../../../background/vault/credentials/pendingCapture';
 import { setPersonalData } from '../../../../background/vault/personalData/storage';
 import { createRootIdentity } from '../../../../background/vault/setup';
 import { readVaultIndex } from '../../../../background/vault/storage';
-import type { FormDetectedMessage, UnlockInput } from '../../../../shared/messages';
+import type {
+  FormDetectedMessage,
+  FormSubmittedMessage,
+  UnlockInput,
+} from '../../../../shared/messages';
+import { normalizeOrigin } from '../../../../shared/origin';
 
 const passphraseInput: UnlockInput = {
   unlockMethod: 'passphrase',
@@ -107,6 +116,9 @@ describe('handleFormDetected', () => {
         },
       ],
       lastDetectedAt: 12345,
+      // No vault set up in this test -- tryLoadAutoApplyInputs() returns
+      // undefined, falling back to "every recognized field counts."
+      askCount: 1,
     });
   });
 
@@ -258,5 +270,125 @@ describe('handleFormDetected -- Phase 4 automation path (vault unlocked)', () =>
 
     expect(sendMessageSpy).not.toHaveBeenCalled();
     expect(await fakeBrowser.action.getBadgeText({ tabId: 11 })).toBe('1');
+  });
+});
+
+describe('handleFormSubmitted (Phase 5 M4)', () => {
+  beforeEach(() => {
+    fakeBrowser.reset();
+  });
+
+  function loginSubmission(
+    overrides: Partial<FormSubmittedMessage['payload']> = {},
+  ): FormSubmittedMessage {
+    return {
+      type: 'FORM_SUBMITTED',
+      payload: {
+        origin: 'https://example.com',
+        formIndex: 0,
+        fields: [
+          {
+            tagName: 'input',
+            type: 'email',
+            name: 'email',
+            id: null,
+            required: true,
+            autocomplete: 'username',
+            value: 'alice@example.com',
+          },
+          {
+            tagName: 'input',
+            type: 'password',
+            name: 'password',
+            id: null,
+            required: true,
+            autocomplete: 'current-password',
+            value: 'hunter2',
+          },
+        ],
+        ...overrides,
+      },
+    };
+  }
+
+  it('stages a captured login when the form is login-shaped', async () => {
+    const result = await handleFormSubmitted(loginSubmission(), { sender: {} });
+    expect(result).toEqual({ captured: true });
+
+    expect(await getPendingCredential(normalizeOrigin('https://example.com'))).toMatchObject({
+      identifier: 'alice@example.com',
+      password: 'hunter2',
+    });
+  });
+
+  it('sets the toolbar badge when a credential is captured', async () => {
+    const ctx = { sender: { tab: { id: 5 } } } as Parameters<typeof handleFormSubmitted>[1];
+    await handleFormSubmitted(loginSubmission(), ctx);
+    expect(await fakeBrowser.action.getBadgeText({ tabId: 5 })).toBe('1');
+  });
+
+  it('does not capture anything when the form has no password field', async () => {
+    const result = await handleFormSubmitted(
+      loginSubmission({
+        fields: [
+          {
+            tagName: 'input',
+            type: 'text',
+            name: 'search',
+            id: null,
+            required: false,
+            autocomplete: null,
+            value: 'some query',
+          },
+        ],
+      }),
+      { sender: {} },
+    );
+    expect(result).toEqual({ captured: false });
+    expect(await getPendingCredential(normalizeOrigin('https://example.com'))).toBeNull();
+  });
+
+  it('does not capture an empty password', async () => {
+    const result = await handleFormSubmitted(
+      loginSubmission({
+        fields: [
+          {
+            tagName: 'input',
+            type: 'password',
+            name: 'password',
+            id: null,
+            required: true,
+            autocomplete: 'current-password',
+            value: '',
+          },
+        ],
+      }),
+      { sender: {} },
+    );
+    expect(result).toEqual({ captured: false });
+  });
+
+  it('captures with a null identifier when no plausible identifier field exists', async () => {
+    const result = await handleFormSubmitted(
+      loginSubmission({
+        fields: [
+          {
+            tagName: 'input',
+            type: 'password',
+            name: 'password',
+            id: null,
+            required: true,
+            autocomplete: 'current-password',
+            value: 'hunter2',
+          },
+        ],
+      }),
+      { sender: {} },
+    );
+    expect(result).toEqual({ captured: true });
+    expect(await getPendingCredential(normalizeOrigin('https://example.com'))).toMatchObject({
+      identifier: null,
+      password: 'hunter2',
+    });
   });
 });

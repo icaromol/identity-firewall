@@ -85,6 +85,37 @@ export const FormDetectedMessageSchema = z.object({
 });
 export type FormDetectedMessage = z.infer<typeof FormDetectedMessageSchema>;
 
+// Phase 5 M4 -- a DetectedField plus the LIVE value it held at the moment
+// a form was submitted. Deliberately a separate schema from DetectedField
+// rather than adding an optional `value` there -- FORM_DETECTED's fields
+// are structural-only by design (Phase 1's own scope boundary: "no
+// semantic classification, no required/optional trust judgment," and
+// certainly no VALUES), and this is the one, narrow exception where a
+// value crosses the content-script boundary at all, only ever for a
+// password-bearing form's own fields, only at submit time.
+export const SubmittedFieldSchema = DetectedFieldSchema.extend({
+  value: z.string(),
+});
+export type SubmittedField = z.infer<typeof SubmittedFieldSchema>;
+
+// Sent only for a form the content script's own cheap check found at
+// least one type="password" field on (content/formDetection.ts) --
+// minimization: an ordinary form's submitted values are never reported at
+// all. background/firewall/loginDetector.ts re-runs its own detection
+// against the structural half of these fields (value stripped) rather
+// than trusting a content-script-side classification, the same
+// content-extracts/background-interprets boundary FORM_DETECTED already
+// keeps.
+export const FormSubmittedMessageSchema = z.object({
+  type: z.literal('FORM_SUBMITTED'),
+  payload: z.object({
+    origin: z.string(),
+    formIndex: z.number(),
+    fields: z.array(SubmittedFieldSchema),
+  }),
+});
+export type FormSubmittedMessage = z.infer<typeof FormSubmittedMessageSchema>;
+
 // --- Popup -> Background ---
 export const GetSessionStateMessageSchema = z.object({
   type: z.literal('GET_SESSION_STATE'),
@@ -276,6 +307,39 @@ export const DeleteCredentialMessageSchema = z.object({
 });
 export type DeleteCredentialMessage = z.infer<typeof DeleteCredentialMessageSchema>;
 
+// --- Popup -> Background: pending (unconfirmed) captured credential
+// (Phase 5 M4) ---
+// A captured login is staged here -- session state, never the encrypted
+// vault -- until the user explicitly confirms via the popup. Mirrors
+// Phase 3's own pending-request pattern (design decision 6,
+// docs/plans/phase-5-vault-completion.md): CONFIRM writes through the
+// already-existing SAVE_CREDENTIAL path; an unconfirmed capture that's
+// never opened just ages out with the rest of chrome.storage.session.
+export const GetPendingCredentialMessageSchema = z.object({
+  type: z.literal('GET_PENDING_CREDENTIAL'),
+  payload: z.object({ origin: z.string() }),
+});
+export type GetPendingCredentialMessage = z.infer<typeof GetPendingCredentialMessageSchema>;
+
+// tabId travels in the payload for the same reason SUBMIT_FIELD_DECISIONS's
+// does -- the handler re-verifies the tab is still showing `origin` before
+// writing anything to the vault.
+export const ConfirmPendingCredentialMessageSchema = z.object({
+  type: z.literal('CONFIRM_PENDING_CREDENTIAL'),
+  payload: z.object({ origin: z.string(), tabId: z.number() }),
+});
+export type ConfirmPendingCredentialMessage = z.infer<typeof ConfirmPendingCredentialMessageSchema>;
+
+// tabId travels here too, purely so the badge can be refreshed for the
+// right tab after discarding -- discarding never writes to the vault, so
+// there's no origin-mismatch risk to guard against the way CONFIRM's own
+// re-verification does.
+export const DiscardPendingCredentialMessageSchema = z.object({
+  type: z.literal('DISCARD_PENDING_CREDENTIAL'),
+  payload: z.object({ origin: z.string(), tabId: z.number() }),
+});
+export type DiscardPendingCredentialMessage = z.infer<typeof DiscardPendingCredentialMessageSchema>;
+
 // --- Popup -> Background: secure export / local backup ---
 // Argon2ParamsSchema itself lives in vault-schema.ts (M2) -- also read/
 // written unencrypted via background/vault/storage.ts's
@@ -310,6 +374,7 @@ export type RestoreVaultBackupMessage = z.infer<typeof RestoreVaultBackupMessage
 
 export const ExtensionMessageSchema = z.discriminatedUnion('type', [
   FormDetectedMessageSchema,
+  FormSubmittedMessageSchema,
   GetSessionStateMessageSchema,
   GetOriginStateMessageSchema,
   GetPendingRequestMessageSchema,
@@ -331,6 +396,9 @@ export const ExtensionMessageSchema = z.discriminatedUnion('type', [
   GetCredentialMessageSchema,
   SaveCredentialMessageSchema,
   DeleteCredentialMessageSchema,
+  GetPendingCredentialMessageSchema,
+  ConfirmPendingCredentialMessageSchema,
+  DiscardPendingCredentialMessageSchema,
   ExportVaultBackupMessageSchema,
   RestoreVaultBackupMessageSchema,
 ]);
@@ -452,6 +520,22 @@ export type SetPersonalDataResponse = PersonalData;
 export type GetCredentialResponse = CredentialRecord[];
 export type SaveCredentialResponse = CredentialRecord;
 export type DeleteCredentialResponse = undefined;
+
+// GET_PENDING_CREDENTIAL/CONFIRM_PENDING_CREDENTIAL/
+// DISCARD_PENDING_CREDENTIAL's response payload shapes
+// (background/vault/credentials/handler.ts, M4). null when nothing is
+// staged for that origin, matching GET_ORIGIN_STATE's own
+// null-when-absent convention. CONFIRM's response is the just-saved
+// CredentialRecord (SAVE_CREDENTIAL's own response shape) -- the popup
+// never needs a second round trip to see what was actually persisted.
+export interface PendingCredential {
+  identifier: string | null;
+  password: string;
+  capturedAt: number;
+}
+export type GetPendingCredentialResponse = PendingCredential | null;
+export type ConfirmPendingCredentialResponse = CredentialRecord;
+export type DiscardPendingCredentialResponse = undefined;
 
 // EXPORT_VAULT_BACKUP/RESTORE_VAULT_BACKUP's response payload shapes
 // (background/vault/handler.ts), same direct-alias convention as above (M7).

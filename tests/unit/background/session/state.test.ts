@@ -29,36 +29,52 @@ describe('session state', () => {
 
   it('round-trips a single recorded origin', async () => {
     const origin = 'https://example.com' as CanonicalOrigin;
-    await recordFormDetection(origin, makeForms(2), 1000);
+    await recordFormDetection(origin, makeForms(2), 1000, 0);
 
     const state = await getSessionState();
-    expect(state.originForms[origin]).toEqual({ forms: makeForms(2), lastDetectedAt: 1000 });
+    expect(state.originForms[origin]).toEqual({
+      forms: makeForms(2),
+      lastDetectedAt: 1000,
+      askCount: 0,
+    });
   });
 
   it('accumulates multiple distinct origins rather than overwriting each other', async () => {
     const originA = 'https://a.example' as CanonicalOrigin;
     const originB = 'https://b.example' as CanonicalOrigin;
 
-    await recordFormDetection(originA, makeForms(1), 100);
-    await recordFormDetection(originB, makeForms(3), 200);
+    await recordFormDetection(originA, makeForms(1), 100, 0);
+    await recordFormDetection(originB, makeForms(3), 200, 0);
 
     const state = await getSessionState();
-    expect(state.originForms[originA]).toEqual({ forms: makeForms(1), lastDetectedAt: 100 });
-    expect(state.originForms[originB]).toEqual({ forms: makeForms(3), lastDetectedAt: 200 });
+    expect(state.originForms[originA]).toEqual({
+      forms: makeForms(1),
+      lastDetectedAt: 100,
+      askCount: 0,
+    });
+    expect(state.originForms[originB]).toEqual({
+      forms: makeForms(3),
+      lastDetectedAt: 200,
+      askCount: 0,
+    });
   });
 
   it('overwrites a previous record for the same origin on re-detection', async () => {
     const origin = 'https://example.com' as CanonicalOrigin;
-    await recordFormDetection(origin, makeForms(1), 100);
-    await recordFormDetection(origin, makeForms(5), 200);
+    await recordFormDetection(origin, makeForms(1), 100, 0);
+    await recordFormDetection(origin, makeForms(5), 200, 0);
 
     const state = await getSessionState();
-    expect(state.originForms[origin]).toEqual({ forms: makeForms(5), lastDetectedAt: 200 });
+    expect(state.originForms[origin]).toEqual({
+      forms: makeForms(5),
+      lastDetectedAt: 200,
+      askCount: 0,
+    });
   });
 
   it('does not carry a recorded origin over into a later empty state', async () => {
     const origin = 'https://example.com' as CanonicalOrigin;
-    await recordFormDetection(origin, makeForms(1), 100);
+    await recordFormDetection(origin, makeForms(1), 100, 0);
     await fakeBrowser.storage.session.clear();
 
     expect(await getSessionState()).toEqual({ originForms: {} });
@@ -69,12 +85,20 @@ describe('session state', () => {
     const originB = 'https://b.example' as CanonicalOrigin;
 
     await Promise.all([
-      recordFormDetection(originA, makeForms(1), 100),
-      recordFormDetection(originB, makeForms(3), 200),
+      recordFormDetection(originA, makeForms(1), 100, 0),
+      recordFormDetection(originB, makeForms(3), 200, 0),
     ]);
 
     const state = await getSessionState();
-    expect(state.originForms[originA]).toEqual({ forms: makeForms(1), lastDetectedAt: 100 });
-    expect(state.originForms[originB]).toEqual({ forms: makeForms(3), lastDetectedAt: 200 });
+    expect(state.originForms[originA]).toEqual({
+      forms: makeForms(1),
+      lastDetectedAt: 100,
+      askCount: 0,
+    });
+    expect(state.originForms[originB]).toEqual({
+      forms: makeForms(3),
+      lastDetectedAt: 200,
+      askCount: 0,
+    });
   });
 });

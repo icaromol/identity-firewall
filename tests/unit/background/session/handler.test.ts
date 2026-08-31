@@ -22,7 +22,7 @@ describe('handleGetOriginState', () => {
   });
 
   it('finds a record stored under the normalized origin when queried with a non-canonical form', async () => {
-    await recordFormDetection('https://example.com' as CanonicalOrigin, makeForms(2), 1000);
+    await recordFormDetection('https://example.com' as CanonicalOrigin, makeForms(2), 1000, 0);
 
     const message: GetOriginStateMessage = {
       type: 'GET_ORIGIN_STATE',

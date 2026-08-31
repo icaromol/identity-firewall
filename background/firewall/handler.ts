@@ -18,6 +18,7 @@ import type {
 import { recordDisclosure } from '../policy/ledger';
 import { resolvePolicy } from '../policy/resolve';
 import { getSessionState } from '../session/state';
+import { assertTabShowsOrigin } from '../tabOriginGuard';
 import { getPersonalData } from '../vault/personalData/storage';
 import { readVaultIndex } from '../vault/storage';
 import { availableResponses } from './responseAvailability';
@@ -133,20 +134,12 @@ export async function handleSubmitFieldDecisions(
 
   // Re-confirms the tab is STILL on the origin these decisions were made
   // for, before resolving or relaying anything -- a /code-review finding:
-  // origin/tabId are captured once when the popup opens and cached in
-  // stores/firewall.store.ts's state. If the tab navigates to a different
-  // site while the popup stays open (e.g. a redirect, or the user
-  // following a link) and the user then clicks Submit, this would
-  // otherwise resolve PersonalData for the OLD origin and relay it via
-  // browser.tabs.sendMessage straight into the NEW page -- a direct
-  // per-site isolation violation. tab.url comes back stripped/undefined
-  // once the 'activeTab' grant for that tab is revoked by navigation (see
-  // wxt.config.ts's own comment on that permission), which is exactly the
-  // signal this check needs: no visible url, no proof of origin, refuse.
-  const tab = await browser.tabs.get(tabId);
-  if (!tab?.url || normalizeOrigin(tab.url) !== normalizeOrigin(origin)) {
-    throw new Error(`Refusing to autofill: tab ${tabId} is no longer showing origin "${origin}"`);
-  }
+  // if the tab navigates to a different site while the popup stays open
+  // (e.g. a redirect, or the user following a link) and the user then
+  // clicks Submit, this would otherwise resolve PersonalData for the OLD
+  // origin and relay it via browser.tabs.sendMessage straight into the
+  // NEW page -- a direct per-site isolation violation.
+  await assertTabShowsOrigin(tabId, origin, 'autofill');
 
   const state = await getSessionState();
   const record = state.originForms[normalizeOrigin(origin)];

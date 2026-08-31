@@ -21,9 +21,21 @@ const SESSION_STORAGE_KEY = 'if_session_state_v1';
 // formCount is derived from forms.length wherever it's still needed
 // (GET_SESSION_STATE/GET_ORIGIN_STATE's existing response shapes), rather
 // than stored separately and risking the two drifting apart.
+//
+// askCount (Phase 5 M4) is the one exception to that rule -- it's a
+// genuinely separate, more expensive computation (requires decrypting
+// PersonalData and reading Policies, via background/badge.ts's
+// tryLoadAutoApplyInputs) that handleFormDetected already has to do once,
+// for its own auto-apply side effects. Caching the result here lets
+// background/badge.ts's updateBadgeForTab -- now also called from
+// FORM_SUBMITTED/CONFIRM/DISCARD_PENDING_CREDENTIAL, none of which change
+// which fields are recognized or how policy resolves them -- read a
+// number instead of re-decrypting the vault on every one of those calls
+// just to refresh a toolbar badge (a /code-review finding).
 export interface OriginFormRecord {
   forms: ClassifiedForm[];
   lastDetectedAt: number; // epoch ms
+  askCount: number;
 }
 
 export interface SessionState {
@@ -49,10 +61,11 @@ export function recordFormDetection(
   origin: CanonicalOrigin,
   forms: ClassifiedForm[],
   detectedAt: number,
+  askCount: number,
 ): Promise<void> {
   const result = writeQueue.then(async () => {
     const state = await getSessionState();
-    state.originForms[origin] = { forms, lastDetectedAt: detectedAt };
+    state.originForms[origin] = { forms, lastDetectedAt: detectedAt, askCount };
     await browser.storage.session.set({ [SESSION_STORAGE_KEY]: state });
   });
   writeQueue = result.catch(() => {});

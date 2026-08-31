@@ -8,11 +8,15 @@
 // stores/privacyLedger.store.ts. Phase 5 M1 adds "Personal data", backed
 // by stores/personalData.store.ts -- the first screen that ever lets a
 // real user populate the values "Real" has resolved to since Phase 3.
+// Phase 5 M4 adds "Save this login?", backed by
+// stores/pendingCredential.store.ts -- a login captured on submit by the
+// content script, staged in session state until confirmed here.
 import { computed, onMounted, reactive, ref } from 'vue';
 import { getFieldKey } from '../../shared/fieldKey';
 import type { ClassifiedField, ClassifiedForm } from '../../shared/messages';
 import type { PersonalData, PersonalDataFieldName, ResponseType } from '../../shared/vault-schema';
 import { useFirewallStore } from '../../stores/firewall.store';
+import { usePendingCredentialStore } from '../../stores/pendingCredential.store';
 import { usePersonalDataStore } from '../../stores/personalData.store';
 import { usePrivacyLedgerStore } from '../../stores/privacyLedger.store';
 import { useSessionStore } from '../../stores/session.store';
@@ -23,6 +27,7 @@ const vault = useVaultStore();
 const firewall = useFirewallStore();
 const privacyLedger = usePrivacyLedgerStore();
 const personalData = usePersonalDataStore();
+const pendingCredential = usePendingCredentialStore();
 
 // Aggregates every recorded ledger entry for this origin into the
 // per-service summary privacy-model.md's own mockup shows ("Disclosed: ✓
@@ -80,6 +85,7 @@ onMounted(() => {
   personalData.fetchPersonalData().then(() => {
     if (personalData.status === 'loaded') Object.assign(personalDataForm, personalData.data);
   });
+  pendingCredential.fetchPendingCredential();
 });
 
 // biome-ignore lint/correctness/noUnusedVariables: called from @submit.prevent in <template> -- Biome only lints the <script> block, it can't see template usage.
@@ -302,6 +308,47 @@ function submitRestoreWithPassphrase() {
             {{ firewall.submitErrors[form.formIndex] }}
           </p>
         </div>
+      </div>
+    </section>
+
+    <section v-if="pendingCredential.pending || pendingCredential.savedCredential" class="mt-4 border-t border-neutral-800 pt-4">
+      <h2 class="text-xs font-semibold uppercase tracking-wide text-neutral-400">
+        Save this login{{ pendingCredential.origin ? ` — ${pendingCredential.origin}` : '' }}?
+      </h2>
+
+      <p v-if="pendingCredential.savedCredential" class="mt-2 text-green-400">Saved.</p>
+
+      <div v-else-if="pendingCredential.pending" class="mt-2 space-y-2">
+        <p class="text-neutral-300">
+          {{ pendingCredential.pending.identifier ?? '(no username/email detected)' }}
+        </p>
+        <input
+          :value="pendingCredential.pending.password"
+          type="password"
+          readonly
+          class="w-full rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-neutral-100"
+        />
+        <div class="flex gap-2">
+          <button
+            type="button"
+            class="flex-1 rounded bg-neutral-100 px-3 py-1.5 font-medium text-neutral-900 disabled:opacity-50"
+            :disabled="pendingCredential.confirming"
+            @click="pendingCredential.confirm()"
+          >
+            Save
+          </button>
+          <button
+            type="button"
+            class="flex-1 rounded border border-neutral-700 px-3 py-1.5 text-neutral-300 disabled:opacity-50"
+            :disabled="pendingCredential.discarding"
+            @click="pendingCredential.discard()"
+          >
+            Discard
+          </button>
+        </div>
+        <p v-if="pendingCredential.actionError" class="text-xs text-red-400">
+          {{ pendingCredential.actionError }}
+        </p>
       </div>
     </section>
 

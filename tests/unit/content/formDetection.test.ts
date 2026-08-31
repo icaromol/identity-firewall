@@ -1,6 +1,11 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it } from 'vitest';
-import { buildFormDetectedMessage, extractForms } from '../../../content/formDetection';
+import {
+  buildFormDetectedMessage,
+  buildFormSubmittedMessage,
+  extractForms,
+  extractSubmittedFields,
+} from '../../../content/formDetection';
 
 // Shared by every describe block below -- each test sets its own fixture
 // markup, but all of them need a clean document.body first.
@@ -162,6 +167,79 @@ describe('buildFormDetectedMessage', () => {
               },
             ],
           },
+        ],
+      },
+    });
+  });
+});
+
+describe('extractSubmittedFields (Phase 5 M4)', () => {
+  it('captures the live value alongside the same structural attributes extractForms reports', () => {
+    document.body.innerHTML = `
+      <form>
+        <input type="email" name="email" autocomplete="username" />
+        <input type="password" name="password" autocomplete="current-password" />
+      </form>
+    `;
+    const form = document.querySelector('form') as HTMLFormElement;
+    (form.querySelector('input[type=email]') as HTMLInputElement).value = 'alice@example.com';
+    (form.querySelector('input[type=password]') as HTMLInputElement).value = 'hunter2';
+
+    expect(extractSubmittedFields(form)).toEqual([
+      {
+        tagName: 'input',
+        type: 'email',
+        name: 'email',
+        id: null,
+        required: false,
+        autocomplete: 'username',
+        value: 'alice@example.com',
+      },
+      {
+        tagName: 'input',
+        type: 'password',
+        name: 'password',
+        id: null,
+        required: false,
+        autocomplete: 'current-password',
+        value: 'hunter2',
+      },
+    ]);
+  });
+});
+
+describe('buildFormSubmittedMessage (Phase 5 M4)', () => {
+  it('returns null when the form has no password field', () => {
+    document.body.innerHTML = `
+      <form>
+        <input type="email" name="email" />
+      </form>
+    `;
+    const form = document.querySelector('form') as HTMLFormElement;
+    expect(buildFormSubmittedMessage(form, 0, 'https://example.com/search')).toBeNull();
+  });
+
+  it('builds a FORM_SUBMITTED message with a normalized origin when a password field exists', () => {
+    document.body.innerHTML = `
+      <form>
+        <input type="email" name="email" />
+        <input type="password" name="password" />
+      </form>
+    `;
+    const form = document.querySelector('form') as HTMLFormElement;
+    (form.querySelector('input[type=email]') as HTMLInputElement).value = 'alice@example.com';
+    (form.querySelector('input[type=password]') as HTMLInputElement).value = 'hunter2';
+
+    const message = buildFormSubmittedMessage(form, 0, 'https://Example.com:443/login');
+
+    expect(message).toMatchObject({
+      type: 'FORM_SUBMITTED',
+      payload: {
+        origin: 'https://example.com',
+        formIndex: 0,
+        fields: [
+          expect.objectContaining({ value: 'alice@example.com' }),
+          expect.objectContaining({ value: 'hunter2' }),
         ],
       },
     });

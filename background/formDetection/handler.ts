@@ -1,48 +1,19 @@
 import type { Browser } from 'wxt/browser';
 import { browser } from 'wxt/browser';
-import type { AutofillFieldsMessage, FormDetectedMessage } from '../../shared/messages';
+import type {
+  AutofillFieldsMessage,
+  DetectedField,
+  FormDetectedMessage,
+  FormSubmittedMessage,
+} from '../../shared/messages';
 import { normalizeOrigin } from '../../shared/origin';
+import { tryLoadAutoApplyInputs, updateBadgeForTab } from '../badge';
 import { classifyForm } from '../firewall/classifier';
+import { detectLoginForm } from '../firewall/loginDetector';
 import { computeAutoApply } from '../policy/autoApply';
 import { recordDisclosure } from '../policy/ledger';
-import { getHighTrustOrigins, getPolicies } from '../policy/storage';
 import { recordFormDetection } from '../session/state';
-import { getPersonalData } from '../vault/personalData/storage';
-import { readVaultIndex } from '../vault/storage';
-
-// Undefined when the vault is locked (or otherwise unreadable) at the
-// moment a form is detected -- automation is simply unavailable then,
-// since generating a 'real' value needs PersonalData and every read here
-// throws VaultLockedError otherwise. Every recognized field falls back to
-// needing the popup's attention in that case, exactly as Phase 3 always
-// behaved.
-async function tryLoadAutoApplyInputs(): Promise<
-  | {
-      policies: Awaited<ReturnType<typeof getPolicies>>;
-      personalData: Awaited<ReturnType<typeof getPersonalData>>;
-      isHighTrustOrigin: (origin: string) => boolean;
-      aliasProviderConfigured: boolean;
-    }
-  | undefined
-> {
-  try {
-    const [policies, personalData, index, highTrustOrigins] = await Promise.all([
-      getPolicies(),
-      getPersonalData(),
-      readVaultIndex(),
-      getHighTrustOrigins(),
-    ]);
-    const normalizedHighTrust = new Set(highTrustOrigins.map((o) => normalizeOrigin(o)));
-    return {
-      policies,
-      personalData,
-      isHighTrustOrigin: (origin: string) => normalizedHighTrust.has(normalizeOrigin(origin)),
-      aliasProviderConfigured: index.aliasProviderConfig.provider !== 'none',
-    };
-  } catch {
-    return undefined;
-  }
-}
+import { setPendingCredential } from '../vault/credentials/pendingCapture';
 
 // Typed inline as the sender shape itself, not imported from
 // router/registry.ts's HandlerContext -- that would make this leaf
@@ -55,15 +26,18 @@ export async function handleFormDetected(
 ): Promise<{ recorded: true }> {
   const { origin, forms, detectedAt } = message.payload;
   const classified = forms.map(classifyForm);
-  await recordFormDetection(normalizeOrigin(origin), classified, detectedAt);
 
   const tabId = ctx.sender.tab?.id;
   const autoApplyInputs = await tryLoadAutoApplyInputs();
 
-  // Toolbar badge now counts fields genuinely awaiting a decision, not
-  // every recognized field (design decision 5) -- a form entirely covered
-  // by policy shows no badge at all, since nothing needs the user's
-  // attention.
+  // The actual auto-apply SIDE EFFECTS (relay AUTOFILL_FIELDS, record a
+  // disclosure) happen here, per-form, in this one pass -- and this same
+  // pass also accumulates askCount, cached alongside `forms` (Phase 5 M4)
+  // so background/badge.ts's updateBadgeForTab can read it back without
+  // redoing this same decrypt-and-resolve work on every later
+  // FORM_SUBMITTED/CONFIRM/DISCARD_PENDING_CREDENTIAL call, none of which
+  // change what's recognized or how policy resolves it (a /code-review
+  // finding).
   let askCount = 0;
 
   for (const form of classified) {
@@ -102,9 +76,56 @@ export async function handleFormDetected(
     );
   }
 
+  await recordFormDetection(normalizeOrigin(origin), classified, detectedAt, askCount);
+
   if (tabId !== undefined) {
-    await browser.action.setBadgeText({ tabId, text: askCount > 0 ? String(askCount) : '' });
+    await updateBadgeForTab(tabId, origin);
   }
 
   return { recorded: true };
+}
+
+// Phase 5 M4 -- captures a typed login on submit and stages it (never
+// writes to the encrypted vault directly -- see pendingCapture.ts's own
+// header comment). Re-runs detectLoginForm itself against the structural
+// half of the submitted fields (value stripped) rather than trusting a
+// content-script-side classification -- the same content-extracts/
+// background-interprets boundary handleFormDetected already keeps.
+export async function handleFormSubmitted(
+  message: FormSubmittedMessage,
+  ctx: { sender: Browser.runtime.MessageSender },
+): Promise<{ captured: boolean }> {
+  const { origin, fields } = message.payload;
+
+  const structuralFields: DetectedField[] = fields.map(({ value: _value, ...field }) => field);
+  const detected = detectLoginForm({
+    formIndex: message.payload.formIndex,
+    action: null,
+    method: null,
+    fields: structuralFields,
+  });
+
+  const password = detected ? fields[detected.passwordFieldIndex]?.value : undefined;
+  if (!detected || !password) {
+    // No password field detected, or it was submitted empty -- nothing
+    // worth capturing either way.
+    return { captured: false };
+  }
+
+  const identifierField =
+    detected.identifierFieldIndex !== null ? fields[detected.identifierFieldIndex] : undefined;
+
+  const normalizedOrigin = normalizeOrigin(origin);
+  await setPendingCredential(normalizedOrigin, {
+    identifier: identifierField?.value ?? null,
+    password,
+    capturedAt: Date.now(),
+  });
+
+  const tabId = ctx.sender.tab?.id;
+  if (tabId !== undefined) {
+    await updateBadgeForTab(tabId, origin);
+  }
+
+  return { captured: true };
 }

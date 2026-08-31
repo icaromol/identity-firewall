@@ -16,5 +16,15 @@
       <input type="email" name="email" required />
       <input type="password" name="password" required />
     </form>
+    <script>
+      // Prevents the default GET-to-self navigation a plain <form> with no
+      // action/method would otherwise trigger on submit -- lets a test
+      // observe FORM_SUBMITTED's effects without racing a page unload.
+      // This is also a realistic stand-in for the common real-world case
+      // of a page submitting via fetch/XHR instead of a real navigation.
+      document.querySelector('form').addEventListener('submit', (event) => {
+        event.preventDefault();
+      });
+    </script>
   </body>
 </html>

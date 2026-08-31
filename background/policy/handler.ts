@@ -1,4 +1,3 @@
-import { browser } from 'wxt/browser';
 import type {
   DeletePolicyMessage,
   DeletePolicyResponse,
@@ -12,6 +11,7 @@ import type {
   SetPolicyResponse,
 } from '../../shared/messages';
 import { normalizeOrigin } from '../../shared/origin';
+import { assertTabShowsOrigin } from '../tabOriginGuard';
 import { readVaultIndex } from '../vault/storage';
 import { deletePolicy, getPolicies, setHighTrustOrigin, setPolicy } from './storage';
 
@@ -31,22 +31,16 @@ export async function handleDeletePolicy(
   return deletePolicy(message.payload.scope, message.payload.fieldType);
 }
 
-// Re-verifies the tab is still on `origin` before acting, mirroring
-// background/firewall/handler.ts's handleSubmitFieldDecisions's own
-// tab-recheck exactly -- a /code-review finding: without it, a stale
-// cached origin (the tab navigated away while the popup stayed open)
-// could mark or unmark safe-mode for the wrong site.
+// Re-verifies the tab is still on `origin` before acting (see
+// tabOriginGuard.ts's own header comment) -- a /code-review finding:
+// without it, a stale cached origin (the tab navigated away while the
+// popup stayed open) could mark or unmark safe-mode for the wrong site.
 export async function handleSetHighTrustOrigin(
   message: SetHighTrustOriginMessage,
 ): Promise<SetHighTrustOriginResponse> {
   const { origin, tabId, isHighTrust } = message.payload;
 
-  const tab = await browser.tabs.get(tabId);
-  if (!tab?.url || normalizeOrigin(tab.url) !== normalizeOrigin(origin)) {
-    throw new Error(
-      `Refusing to change high-trust status: tab ${tabId} is no longer showing origin "${origin}"`,
-    );
-  }
+  await assertTabShowsOrigin(tabId, origin, 'change high-trust status');
 
   return setHighTrustOrigin(origin, isHighTrust);
 }

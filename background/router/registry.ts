@@ -11,7 +11,7 @@
 import type { Browser } from 'wxt/browser';
 import type { ExtensionMessage } from '../../shared/messages';
 import { handleGetPendingRequest, handleSubmitFieldDecisions } from '../firewall/handler';
-import { handleFormDetected } from '../formDetection/handler';
+import { handleFormDetected, handleFormSubmitted } from '../formDetection/handler';
 import { handleCreateServiceIdentity, handleGetServiceIdentity } from '../identity/handler';
 import {
   handleDeletePolicy,
@@ -22,8 +22,11 @@ import {
 } from '../policy/handler';
 import { handleGetOriginState, handleGetSessionState } from '../session/handler';
 import {
+  handleConfirmPendingCredential,
   handleDeleteCredential,
+  handleDiscardPendingCredential,
   handleGetCredential,
+  handleGetPendingCredential,
   handleSaveCredential,
 } from '../vault/credentials/handler';
 import {
@@ -61,6 +64,10 @@ export const registry: Registry = {
   FORM_DETECTED: {
     capability: 'formDetection',
     handle: (message, ctx) => handleFormDetected(message, ctx),
+  },
+  FORM_SUBMITTED: {
+    capability: 'formDetection',
+    handle: (message, ctx) => handleFormSubmitted(message, ctx),
   },
   GET_SESSION_STATE: {
     capability: 'session',
@@ -121,6 +128,18 @@ export const registry: Registry = {
   DELETE_CREDENTIAL: {
     capability: 'vault',
     handle: (message) => handleDeleteCredential(message),
+  },
+  GET_PENDING_CREDENTIAL: {
+    capability: 'vault',
+    handle: (message) => handleGetPendingCredential(message),
+  },
+  CONFIRM_PENDING_CREDENTIAL: {
+    capability: 'vault',
+    handle: (message) => handleConfirmPendingCredential(message),
+  },
+  DISCARD_PENDING_CREDENTIAL: {
+    capability: 'vault',
+    handle: (message) => handleDiscardPendingCredential(message),
   },
   EXPORT_VAULT_BACKUP: {
     capability: 'vault',

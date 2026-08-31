@@ -12,7 +12,13 @@
 // roots, everything testable lives in a plain module a Vitest test can
 // import directly without going through WXT's entrypoint machinery.
 
-import type { DetectedField, DetectedForm, FormDetectedMessage } from '../shared/messages';
+import type {
+  DetectedField,
+  DetectedForm,
+  FormDetectedMessage,
+  FormSubmittedMessage,
+  SubmittedField,
+} from '../shared/messages';
 import { normalizeOrigin } from '../shared/origin';
 
 // Named once and reused by both functions below, rather than duplicating
@@ -43,7 +49,10 @@ export function getDetectableFields(form: HTMLFormElement): DetectableFieldEleme
   return Array.from(form.elements).filter(isDetectableField);
 }
 
-function extractField(el: DetectableFieldElement): DetectedField {
+// Exported so extractSubmittedFields (below) can build a SubmittedField as
+// extractField's own DetectedField shape plus a live value, without
+// duplicating the attribute-reading logic.
+export function extractField(el: DetectableFieldElement): DetectedField {
   return {
     tagName: el.tagName.toLowerCase() as DetectedField['tagName'],
     type: el instanceof HTMLInputElement ? el.type : null,
@@ -97,5 +106,37 @@ export function buildFormDetectedMessage(
       detectedAt,
       forms,
     },
+  };
+}
+
+/**
+ * Phase 5 M4 -- the one, narrow exception to this file's own "structure,
+ * never values" rule (see the header comment): live field VALUES at the
+ * moment a form was submitted, needed to capture a typed login. Reuses
+ * getDetectableFields()'s exact same walk/filter as extractForms() above,
+ * so a field's position here matches FORM_DETECTED's own indexing.
+ */
+export function extractSubmittedFields(form: HTMLFormElement): SubmittedField[] {
+  return getDetectableFields(form).map((el) => ({ ...extractField(el), value: el.value }));
+}
+
+/**
+ * Builds the FORM_SUBMITTED message, or null when the form has no
+ * type="password" field at all -- minimization: an ordinary form's
+ * submitted values (a search box, a newsletter signup) are never
+ * reported, only ones background/firewall/loginDetector.ts could
+ * plausibly care about.
+ */
+export function buildFormSubmittedMessage(
+  form: HTMLFormElement,
+  formIndex: number,
+  href: string,
+): FormSubmittedMessage | null {
+  const fields = extractSubmittedFields(form);
+  if (!fields.some((f) => f.type === 'password')) return null;
+
+  return {
+    type: 'FORM_SUBMITTED',
+    payload: { origin: normalizeOrigin(href), formIndex, fields },
   };
 }
