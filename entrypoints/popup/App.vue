@@ -5,12 +5,15 @@
 // add the "Pending request" section below, backed by
 // stores/firewall.store.ts -- the Identity Firewall's approval UI. Phase 4
 // M5 adds "What this site knows about you", backed by
-// stores/privacyLedger.store.ts.
-import { computed, onMounted, ref } from 'vue';
+// stores/privacyLedger.store.ts. Phase 5 M1 adds "Personal data", backed
+// by stores/personalData.store.ts -- the first screen that ever lets a
+// real user populate the values "Real" has resolved to since Phase 3.
+import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { getFieldKey } from '../../shared/fieldKey';
 import type { ClassifiedField, ClassifiedForm } from '../../shared/messages';
-import type { PersonalDataFieldName, ResponseType } from '../../shared/vault-schema';
+import type { PersonalData, PersonalDataFieldName, ResponseType } from '../../shared/vault-schema';
 import { useFirewallStore } from '../../stores/firewall.store';
+import { usePersonalDataStore } from '../../stores/personalData.store';
 import { usePrivacyLedgerStore } from '../../stores/privacyLedger.store';
 import { useSessionStore } from '../../stores/session.store';
 import { useVaultStore } from '../../stores/vault.store';
@@ -19,6 +22,7 @@ const session = useSessionStore();
 const vault = useVaultStore();
 const firewall = useFirewallStore();
 const privacyLedger = usePrivacyLedgerStore();
+const personalData = usePersonalDataStore();
 
 // Aggregates every recorded ledger entry for this origin into the
 // per-service summary privacy-model.md's own mockup shows ("Disclosed: ✓
@@ -58,12 +62,31 @@ const restoreFile = ref<File | null>(null);
 const restoreBackupPassphrase = ref('');
 const restoreNewPassphrase = ref('');
 
+// A local reactive copy of PersonalData for the form to bind against --
+// synced from the store once GET_PERSONAL_DATA resolves (below), rather
+// than binding v-model directly to store.data, so an in-progress edit
+// isn't clobbered if the store's data were ever refetched.
+const personalDataForm = reactive<PersonalData>({});
+watch(
+  () => personalData.status,
+  (status) => {
+    if (status === 'loaded') Object.assign(personalDataForm, personalData.data);
+  },
+  { immediate: true },
+);
+
 onMounted(() => {
   session.fetchSessionState();
   vault.fetchStatus();
   firewall.fetchPendingRequest();
   privacyLedger.fetchLedger();
+  personalData.fetchPersonalData();
 });
+
+// biome-ignore lint/correctness/noUnusedVariables: called from @submit.prevent in <template> -- Biome only lints the <script> block, it can't see template usage.
+function submitPersonalData() {
+  personalData.savePersonalData({ ...personalDataForm });
+}
 
 // Preserves each field's true index within form.fields (needed for
 // getFieldKey's positional fallback) while still letting the template
@@ -314,6 +337,81 @@ function submitRestoreWithPassphrase() {
           Last access: {{ new Date(ledgerSummary.lastAccess).toLocaleString() }}
         </p>
       </div>
+    </section>
+
+    <section class="mt-4 border-t border-neutral-800 pt-4">
+      <h2 class="text-xs font-semibold uppercase tracking-wide text-neutral-400">Personal data</h2>
+      <p class="mt-1 text-xs text-neutral-500">
+        What "Real" actually sends when you choose it for a field.
+      </p>
+
+      <p
+        v-if="personalData.status === 'idle' || personalData.status === 'loading'"
+        class="mt-2 text-neutral-400"
+      >
+        Loading…
+      </p>
+
+      <!-- Most commonly VAULT_LOCKED -- same "plain error string, no
+           special-casing" convention as the Pending request section
+           above for the identical underlying cause. -->
+      <p v-else-if="personalData.status === 'error'" class="mt-2 text-red-400">
+        {{ personalData.error }}
+      </p>
+
+      <form v-else class="mt-2 space-y-2" @submit.prevent="submitPersonalData">
+        <input
+          v-model="personalDataForm.name"
+          type="text"
+          placeholder="Name"
+          class="w-full rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-neutral-100"
+        />
+        <input
+          v-model="personalDataForm.email"
+          type="email"
+          placeholder="Email"
+          class="w-full rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-neutral-100"
+        />
+        <input
+          v-model="personalDataForm.phone"
+          type="tel"
+          placeholder="Phone"
+          class="w-full rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-neutral-100"
+        />
+        <input
+          v-model="personalDataForm.address"
+          type="text"
+          placeholder="Address"
+          class="w-full rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-neutral-100"
+        />
+        <input
+          v-model="personalDataForm.birthDate"
+          type="date"
+          class="w-full rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-neutral-100"
+        />
+        <div>
+          <input
+            v-model="personalDataForm.nationalId"
+            type="text"
+            placeholder="National ID (e.g. CPF)"
+            class="w-full rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-neutral-100"
+          />
+          <p class="mt-1 text-xs text-neutral-500">
+            Highly sensitive -- always asked for, never filled automatically.
+          </p>
+        </div>
+
+        <button
+          type="submit"
+          class="w-full rounded bg-neutral-100 px-3 py-1.5 font-medium text-neutral-900 disabled:opacity-50"
+          :disabled="personalData.saving"
+        >
+          Save
+        </button>
+        <p v-if="personalData.saveError" class="text-xs text-red-400">
+          {{ personalData.saveError }}
+        </p>
+      </form>
     </section>
 
     <section class="mt-4 border-t border-neutral-800 pt-4">
