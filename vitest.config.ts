@@ -27,6 +27,13 @@ export default defineConfig({
     // own default excludes (configDefaults.exclude) rather than replacing
     // them, so node_modules/dist/etc. stay excluded too. See M6 in
     // docs/plans/phase-1-extension-foundation.md.
-    exclude: [...configDefaults.exclude, 'tests/e2e/**'],
+    //
+    // .claude/worktrees/**/*.test.ts: a /code-review isolated-worktree
+    // agent's checkout lives inside the repo directory and duplicates
+    // every test file path -- if its own .wxt/tsconfig.json was never
+    // generated there, Vitest fails the whole run trying to transform its
+    // copies. Worktrees are ephemeral tooling infra, never meant to be
+    // test-scanned, regardless of whether one happens to still be present.
+    exclude: [...configDefaults.exclude, 'tests/e2e/**', '.claude/worktrees/**'],
   },
 });
