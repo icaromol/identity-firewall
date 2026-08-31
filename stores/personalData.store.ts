@@ -13,8 +13,10 @@ import { defineStore } from 'pinia';
 import { browser } from 'wxt/browser';
 import type {
   GetPersonalDataMessage,
+  GetPersonalDataResponse,
   MessageResponse,
   SetPersonalDataMessage,
+  SetPersonalDataResponse,
 } from '../shared/messages';
 import type { PersonalData } from '../shared/vault-schema';
 
@@ -41,7 +43,8 @@ export const usePersonalDataStore = defineStore('personalData', {
 
       try {
         const message: GetPersonalDataMessage = { type: 'GET_PERSONAL_DATA', payload: {} };
-        const response: MessageResponse<PersonalData> = await browser.runtime.sendMessage(message);
+        const response: MessageResponse<GetPersonalDataResponse> =
+          await browser.runtime.sendMessage(message);
 
         if (response.ok) {
           this.data = response.data;
@@ -68,7 +71,8 @@ export const usePersonalDataStore = defineStore('personalData', {
 
       try {
         const message: SetPersonalDataMessage = { type: 'SET_PERSONAL_DATA', payload: patch };
-        const response: MessageResponse<PersonalData> = await browser.runtime.sendMessage(message);
+        const response: MessageResponse<SetPersonalDataResponse> =
+          await browser.runtime.sendMessage(message);
 
         if (response.ok) {
           this.data = response.data;

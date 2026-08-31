@@ -42,6 +42,32 @@ test('entering personal data through the popup survives a reload (real encrypted
   await expect(popup.getByPlaceholder('Phone')).toHaveValue('+55 11 90000-0000');
 });
 
+test('a malformed email does not block saving the other fields (/code-review regression guard)', async ({
+  context,
+  extensionId,
+}) => {
+  const popup = await context.newPage();
+  await popup.goto(`chrome-extension://${extensionId}/popup.html`);
+  const passphrase = 'correct horse battery staple';
+
+  await popup.getByPlaceholder('Or choose a passphrase instead').fill(passphrase);
+  await popup.getByRole('button', { name: 'Set up with Passphrase' }).click();
+  await expect(popup.getByText('Vault unlocked.')).toBeVisible();
+  await popup.reload();
+
+  // The Email input is type="email" -- without the form's own `novalidate`,
+  // the browser's native constraint validation would silently swallow this
+  // click entirely (submitPersonalData never called), leaving Name unsaved
+  // too even though it's perfectly valid. This is exactly the bug a
+  // /code-review finder caught.
+  await popup.getByPlaceholder('Name').fill('Ícaro');
+  await popup.getByPlaceholder('Email').fill('not-a-valid-email');
+  await popup.getByRole('button', { name: 'Save' }).click();
+
+  await popup.reload();
+  await expect(popup.getByPlaceholder('Name')).toHaveValue('Ícaro');
+});
+
 test('the Personal data section shows a graceful error while the vault is locked', async ({
   context,
   extensionId,

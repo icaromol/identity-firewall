@@ -8,7 +8,7 @@
 // stores/privacyLedger.store.ts. Phase 5 M1 adds "Personal data", backed
 // by stores/personalData.store.ts -- the first screen that ever lets a
 // real user populate the values "Real" has resolved to since Phase 3.
-import { computed, onMounted, reactive, ref, watch } from 'vue';
+import { computed, onMounted, reactive, ref } from 'vue';
 import { getFieldKey } from '../../shared/fieldKey';
 import type { ClassifiedField, ClassifiedForm } from '../../shared/messages';
 import type { PersonalData, PersonalDataFieldName, ResponseType } from '../../shared/vault-schema';
@@ -65,26 +65,29 @@ const restoreNewPassphrase = ref('');
 // A local reactive copy of PersonalData for the form to bind against --
 // synced from the store once GET_PERSONAL_DATA resolves (below), rather
 // than binding v-model directly to store.data, so an in-progress edit
-// isn't clobbered if the store's data were ever refetched.
+// isn't clobbered if the store's data were ever refetched. A one-shot
+// sync after the single fetchPersonalData() call below, not a lifetime
+// watch(status) -- that call only ever runs once (onMounted), so a
+// persistent subscription was more machinery than the actual lifecycle
+// needs (/code-review finding).
 const personalDataForm = reactive<PersonalData>({});
-watch(
-  () => personalData.status,
-  (status) => {
-    if (status === 'loaded') Object.assign(personalDataForm, personalData.data);
-  },
-  { immediate: true },
-);
 
 onMounted(() => {
   session.fetchSessionState();
   vault.fetchStatus();
   firewall.fetchPendingRequest();
   privacyLedger.fetchLedger();
-  personalData.fetchPersonalData();
+  personalData.fetchPersonalData().then(() => {
+    if (personalData.status === 'loaded') Object.assign(personalDataForm, personalData.data);
+  });
 });
 
 // biome-ignore lint/correctness/noUnusedVariables: called from @submit.prevent in <template> -- Biome only lints the <script> block, it can't see template usage.
 function submitPersonalData() {
+  // patch is the full form snapshot, not a minimal diff -- SET_PERSONAL_DATA
+  // itself is patch-style (a key omitted server-side leaves the stored
+  // value untouched), which matters for a FUTURE caller sending a partial
+  // object, not for this one, which always has every field in scope.
   personalData.savePersonalData({ ...personalDataForm });
 }
 
@@ -359,7 +362,14 @@ function submitRestoreWithPassphrase() {
         {{ personalData.error }}
       </p>
 
-      <form v-else class="mt-2 space-y-2" @submit.prevent="submitPersonalData">
+      <!-- novalidate: PersonalDataSchema never enforces email FORMAT (it's
+           a bare z.string().optional()) -- without this, the browser's own
+           native constraint validation on type="email" would silently
+           block the whole form's submit (Name/Phone/etc included) the
+           moment Email looks malformed, with no saveError ever shown
+           (/code-review finding: submitPersonalData is never even called
+           in that case). -->
+      <form v-else class="mt-2 space-y-2" novalidate @submit.prevent="submitPersonalData">
         <input
           v-model="personalDataForm.name"
           type="text"
