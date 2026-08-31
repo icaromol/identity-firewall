@@ -72,6 +72,10 @@ A site's HTML form will often mark a field as required or optional (e.g. via the
 
 Consequently, the classifier's job is to report a field as **"apparently optional"** rather than definitively optional, and the UI should reflect that hedge rather than presenting the form's own claim as settled fact. Optional (or apparently-optional) fields are blocked by default regardless — the user only sees a prompt when a genuine decision is needed, not for every field a site happens to render.
 
+## Generated passwords (Phase 5)
+
+The local password generator (`background/vault/credentials/passwordGenerator.ts`) produces a 20-character string by default, drawn from a fixed 80-character set: uppercase and lowercase Latin letters, digits, and 18 symbols (``!@#$%^&*()-_=+[]{}``) chosen to be broadly accepted by real-world password policies — no space, no quote/backslash characters that occasionally trip up naive form validators. `crypto.getRandomValues` (Web Crypto) is the only randomness source, with rejection sampling to keep every charset character equally likely rather than a plain modulo, which would slightly favor the charset's first 16 entries (256 isn't evenly divisible by 80). 20 characters against an 80-character alphabet is roughly 126 bits of entropy (log2(80) ≈ 6.32 bits/char × 20) — comfortably beyond what any realistic offline attack budget threatens, and long enough that trimming the charset for readability was judged not worth the entropy cost.
+
 ## Where the rest of this lives
 
 - [identity-model.md](identity-model.md) — how ServiceIdentities are derived and kept unlinkable from each other.
