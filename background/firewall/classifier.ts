@@ -62,7 +62,11 @@ const FIELD_TYPE_PRIORITY: (keyof PersonalData)[] = [
 const COMBINING_MARK_RANGE_START = 0x0300;
 const COMBINING_MARK_RANGE_END = 0x036f;
 
-function tokenize(raw: string): Set<string> {
+// Exported for loginDetector.ts's own identifier-token matching (Phase 5
+// M3) -- the same word-boundary-aware tokenization this file already
+// relies on for FIELD_SYNONYMS, reused with a different vocabulary rather
+// than reimplemented with a weaker (substring-based) mechanism.
+export function tokenize(raw: string): Set<string> {
   const stripped = Array.from(raw.normalize('NFD'))
     .filter((ch) => {
       const code = ch.codePointAt(0) ?? 0;
@@ -85,13 +89,52 @@ function classifyByTokens(field: DetectedField): keyof PersonalData | null {
   return null;
 }
 
+// Input types that can never hold a meaningful PersonalData string value,
+// no matter what their name/id happens to contain -- a hidden CSRF token,
+// a submit/reset/image button, or a file picker doesn't carry personal
+// data just because its id happens to be e.g. "email_hash" or
+// "address_proof". Exported and shared with loginDetector.ts's own
+// field-count fallback (which independently needs "types that are never a
+// meaningful signal" for a related but distinct reason) so the two
+// definitions can't drift apart (/code-review finding, Phase 5 M3).
+// 'password' is handled as its own, separate case in classifyField below,
+// not folded into this set -- loginDetector.ts's field-count heuristic
+// DOES want a password field to count as real signal, unlike these.
+export const NON_SIGNAL_FIELD_TYPES = new Set([
+  'hidden',
+  'submit',
+  'button',
+  'reset',
+  'image',
+  'file',
+]);
+
 export function classifyField(field: DetectedField): ClassifiedField {
   // input[type] is the strongest, least ambiguous signal available where
   // it exists at all -- checked first, ahead of any token matching.
+  //
+  // password and NON_SIGNAL_FIELD_TYPES are excluded before any token
+  // match is even attempted (/code-review finding, Phase 5 M3): without
+  // this, e.g. a password field whose name/id happens to contain a
+  // PersonalData synonym token (id="reset_password_email") could get
+  // assigned a real fieldType and flow straight into the Policy Engine's
+  // auto-apply path -- silently auto-filling a real PersonalData value (a
+  // genuine email, say) into a <input type="password"> element, or into a
+  // hidden field the user never even saw. This is the actual enforcement
+  // background/firewall/loginDetector.ts's own header comment refers to.
   let fieldType: keyof PersonalData | null = null;
-  if (field.type === 'email') fieldType = 'email';
-  else if (field.type === 'tel') fieldType = 'phone';
-  else fieldType = classifyByTokens(field);
+  if (
+    field.type === 'password' ||
+    (field.type !== null && NON_SIGNAL_FIELD_TYPES.has(field.type))
+  ) {
+    fieldType = null;
+  } else if (field.type === 'email') {
+    fieldType = 'email';
+  } else if (field.type === 'tel') {
+    fieldType = 'phone';
+  } else {
+    fieldType = classifyByTokens(field);
+  }
 
   return {
     ...field,

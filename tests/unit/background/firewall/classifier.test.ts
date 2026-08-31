@@ -70,6 +70,21 @@ describe('classifyField', () => {
     expect(result.sensitivity).toBeNull();
   });
 
+  it('never classifies a password field, even when its name/id contains a synonym token (/code-review regression guard, Phase 5 M3)', () => {
+    const result = classifyField(field({ type: 'password', id: 'reset_password_email' }));
+    expect(result.fieldType).toBeNull();
+    expect(result.sensitivity).toBeNull();
+  });
+
+  it.each(['hidden', 'submit', 'button', 'reset', 'image', 'file'])(
+    'never classifies a type=%s field, even when its name/id contains a synonym token (/code-review regression guard, Phase 5 M3)',
+    (type) => {
+      const result = classifyField(field({ type, id: 'address_proof' }));
+      expect(result.fieldType).toBeNull();
+      expect(result.sensitivity).toBeNull();
+    },
+  );
+
   it('classifies an unrecognized field as null fieldType and null sensitivity', () => {
     const result = classifyField(field({ tagName: 'textarea', type: null, name: 'message' }));
     expect(result.fieldType).toBeNull();
