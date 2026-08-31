@@ -170,6 +170,8 @@ Without needing to reveal the user's real identity.
 
 ## 7. Killer features
 
+> Scheduling note: for a long time only 7.1 had any presence in `docs/roadmap.md`'s actual phase objectives. As of the Phase 5 roadmap restructuring, all four are scheduled: 7.1 is delivered partially (per-active-tab only) in Phase 4, extended to every site in Phase 6 (Extension Dashboard); 7.2, 7.3, and 7.4 are all Phase 6 as well. See `docs/roadmap.md` for current status.
+
 ### 7.1 — "Who knows what about me?"
 
 A per-site dashboard that turns abstract security into something visual:
