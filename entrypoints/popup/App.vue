@@ -82,9 +82,16 @@ const restoreNewPassphrase = ref('');
 // needs (/code-review finding).
 const personalDataForm = reactive<PersonalData>({});
 
-onMounted(() => {
+// Every section scoped to the vault's own contents (as opposed to
+// vault.store.ts's own status) needs re-fetching both on mount AND right
+// after a successful setup/unlock -- each of those stores only fetches
+// once by itself (session.store.ts's own established convention), so
+// unlocking mid-popup-session previously left them stuck showing
+// VAULT_LOCKED until the popup was closed and reopened (a real usability
+// gap found during Phase 5 M7's manual verification, not just the
+// narrower personalData-only case M1's own e2e test already flagged).
+function refreshVaultScopedSections(): void {
   session.fetchSessionState();
-  vault.fetchStatus();
   firewall.fetchPendingRequest();
   privacyLedger.fetchLedger();
   personalData.fetchPersonalData().then(() => {
@@ -92,6 +99,11 @@ onMounted(() => {
   });
   pendingCredential.fetchPendingCredential();
   savedCredentials.fetchCredentials();
+}
+
+onMounted(() => {
+  vault.fetchStatus();
+  refreshVaultScopedSections();
 });
 
 // biome-ignore lint/correctness/noUnusedVariables: called from @submit.prevent in <template> -- Biome only lints the <script> block, it can't see template usage.
@@ -122,16 +134,30 @@ function onDecisionChange(formIndex: number, fieldKey: string, event: Event): vo
   if (value) firewall.setDecision(formIndex, fieldKey, value as ResponseType);
 }
 
-// biome-ignore lint/correctness/noUnusedVariables: called from @submit.prevent in <template> -- Biome only lints the <script> block, it can't see template usage.
-function submitSetupPassphrase() {
-  vault.setupWithPassphrase(setupPassphrase.value);
-  setupPassphrase.value = '';
+// biome-ignore lint/correctness/noUnusedVariables: called from @click in <template> -- Biome only lints the <script> block, it can't see template usage.
+async function clickSetupWithPasskey() {
+  await vault.setupWithPasskey();
+  if (!vault.locked) refreshVaultScopedSections();
 }
 
 // biome-ignore lint/correctness/noUnusedVariables: called from @submit.prevent in <template> -- Biome only lints the <script> block, it can't see template usage.
-function submitUnlockPassphrase() {
-  vault.unlockWithPassphrase(unlockPassphrase.value);
+async function submitSetupPassphrase() {
+  await vault.setupWithPassphrase(setupPassphrase.value);
+  setupPassphrase.value = '';
+  if (!vault.locked) refreshVaultScopedSections();
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: called from @click in <template> -- Biome only lints the <script> block, it can't see template usage.
+async function clickUnlockWithPasskey() {
+  await vault.unlockWithPasskey();
+  if (!vault.locked) refreshVaultScopedSections();
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: called from @submit.prevent in <template> -- Biome only lints the <script> block, it can't see template usage.
+async function submitUnlockPassphrase() {
+  await vault.unlockWithPassphrase(unlockPassphrase.value);
   unlockPassphrase.value = '';
+  if (!vault.locked) refreshVaultScopedSections();
 }
 
 // biome-ignore lint/correctness/noUnusedVariables: called from @submit.prevent in <template> -- Biome only lints the <script> block, it can't see template usage.
@@ -528,7 +554,8 @@ function submitRestoreWithPassphrase() {
         >
           Save
         </button>
-        <p v-if="personalData.saveError" class="text-xs text-red-400">
+        <p v-if="personalData.justSaved" class="text-xs text-green-400">Saved.</p>
+        <p v-else-if="personalData.saveError" class="text-xs text-red-400">
           {{ personalData.saveError }}
         </p>
       </form>
@@ -555,7 +582,7 @@ function submitRestoreWithPassphrase() {
           type="button"
           class="w-full rounded bg-neutral-100 px-3 py-1.5 font-medium text-neutral-900 disabled:opacity-50"
           :disabled="vault.status === 'loading'"
-          @click="vault.setupWithPasskey()"
+          @click="clickSetupWithPasskey()"
         >
           Set up with Passkey (recommended)
         </button>
@@ -652,7 +679,7 @@ function submitRestoreWithPassphrase() {
           type="button"
           class="w-full rounded bg-neutral-100 px-3 py-1.5 font-medium text-neutral-900 disabled:opacity-50"
           :disabled="vault.status === 'loading'"
-          @click="vault.unlockWithPasskey()"
+          @click="clickUnlockWithPasskey()"
         >
           Unlock with Passkey
         </button>

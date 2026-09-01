@@ -26,6 +26,12 @@ export interface PersonalDataStoreState {
   error: string | null;
   saving: boolean;
   saveError: string | null;
+  // Confirms a save actually happened (a real M7 manual-verification
+  // finding -- the form had no success feedback at all before this,
+  // leaving "did that work?" as the only signal a click gave). Cleared at
+  // the START of the next save attempt, not on a timer -- the next
+  // attempt's own result (success or saveError) is what should replace it.
+  justSaved: boolean;
 }
 
 export const usePersonalDataStore = defineStore('personalData', {
@@ -35,6 +41,7 @@ export const usePersonalDataStore = defineStore('personalData', {
     error: null,
     saving: false,
     saveError: null,
+    justSaved: false,
   }),
   actions: {
     async fetchPersonalData(): Promise<void> {
@@ -68,6 +75,7 @@ export const usePersonalDataStore = defineStore('personalData', {
     async savePersonalData(patch: PersonalData): Promise<void> {
       this.saving = true;
       this.saveError = null;
+      this.justSaved = false;
 
       try {
         const message: SetPersonalDataMessage = { type: 'SET_PERSONAL_DATA', payload: patch };
@@ -76,6 +84,7 @@ export const usePersonalDataStore = defineStore('personalData', {
 
         if (response.ok) {
           this.data = response.data;
+          this.justSaved = true;
         } else {
           this.saveError = response.error;
         }

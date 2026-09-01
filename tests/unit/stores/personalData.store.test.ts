@@ -88,4 +88,48 @@ describe('usePersonalDataStore', () => {
     expect(store.saveError).toBe('boom');
     expect(store.data).toEqual({});
   });
+
+  // Phase 5 M7 manual-verification finding -- the Save button had no
+  // success feedback at all before this; a click looked identical whether
+  // it worked or not.
+  it('sets justSaved on success', async () => {
+    vi.spyOn(fakeBrowser.runtime, 'sendMessage').mockResolvedValueOnce({
+      ok: true,
+      data: { name: 'Ícaro' },
+    } as never);
+
+    const store = usePersonalDataStore();
+    await store.savePersonalData({ name: 'Ícaro' });
+
+    expect(store.justSaved).toBe(true);
+  });
+
+  it('does not set justSaved on a handler-level failure', async () => {
+    vi.spyOn(fakeBrowser.runtime, 'sendMessage').mockResolvedValueOnce({
+      ok: false,
+      error: 'boom',
+    } as never);
+
+    const store = usePersonalDataStore();
+    await store.savePersonalData({ name: 'Someone' });
+
+    expect(store.justSaved).toBe(false);
+  });
+
+  it('clears a previous justSaved at the start of a new save attempt', async () => {
+    vi.spyOn(fakeBrowser.runtime, 'sendMessage').mockResolvedValueOnce({
+      ok: true,
+      data: { name: 'Ícaro' },
+    } as never);
+    const store = usePersonalDataStore();
+    await store.savePersonalData({ name: 'Ícaro' });
+    expect(store.justSaved).toBe(true);
+
+    vi.spyOn(fakeBrowser.runtime, 'sendMessage').mockResolvedValueOnce({
+      ok: false,
+      error: 'boom',
+    } as never);
+    await store.savePersonalData({ name: 'Someone else' });
+    expect(store.justSaved).toBe(false);
+  });
 });

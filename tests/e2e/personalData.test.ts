@@ -14,24 +14,21 @@ test('entering personal data through the popup survives a reload (real encrypted
   await popup.goto(`chrome-extension://${extensionId}/popup.html`);
   const passphrase = 'correct horse battery staple';
 
-  // Setup via the real UI -- same pattern as vaultLifecycle.test.ts.
+  // Setup via the real UI -- same pattern as vaultLifecycle.test.ts. No
+  // reload needed here (a Phase 5 M7 manual-verification finding, fixed
+  // in App.vue): every vault-scoped section, personalData.store.ts
+  // included, now refetches right after a successful setup/unlock,
+  // instead of staying stuck on its stale pre-unlock VAULT_LOCKED state
+  // until the popup was closed and reopened.
   await popup.getByPlaceholder('Or choose a passphrase instead').fill(passphrase);
   await popup.getByRole('button', { name: 'Set up with Passphrase' }).click();
   await expect(popup.getByText('Vault unlocked.')).toBeVisible();
-
-  // personalData.store.ts fetches once on mount, before the vault was set
-  // up, and nothing re-triggers it when setup succeeds mid-session --
-  // vault.store.ts doesn't refetch firewall/privacyLedger either (see
-  // those stores' own header comments); every store fetches independently
-  // on its own mount. Reloading is exactly what a real user does after
-  // first-time setup by reopening the popup, and mirrors
-  // vaultLifecycle.test.ts's own reload-to-see-fresh-state pattern.
-  await popup.reload();
 
   await popup.getByPlaceholder('Name').fill('Ícaro');
   await popup.getByPlaceholder('Email').fill('icaro@example.com');
   await popup.getByPlaceholder('Phone').fill('+55 11 90000-0000');
   await popup.getByRole('button', { name: 'Save' }).click();
+  await expect(popup.getByText('Saved.', { exact: true })).toBeVisible();
 
   // Reload -- forces a fresh GET_PERSONAL_DATA against real, freshly-
   // decrypted storage, not whatever the store happened to hold in memory
@@ -53,7 +50,6 @@ test('a malformed email does not block saving the other fields (/code-review reg
   await popup.getByPlaceholder('Or choose a passphrase instead').fill(passphrase);
   await popup.getByRole('button', { name: 'Set up with Passphrase' }).click();
   await expect(popup.getByText('Vault unlocked.')).toBeVisible();
-  await popup.reload();
 
   // The Email input is type="email" -- without the form's own `novalidate`,
   // the browser's native constraint validation would silently swallow this
