@@ -227,7 +227,7 @@ Every service has a local history of its relationship with the user's identity.
 
 ---
 
-## Phase 5 — Vault Completion
+## Phase 5 — Vault Completion ✅ Complete
 
 **Weeks 15–16**
 
@@ -256,7 +256,7 @@ Credentials  ─┼─→ Popup UI ─→ Real response type actually works
 Passwords    ─┘
 ```
 
-**Detailed execution plan:** [`plans/phase-5-vault-completion.md`](plans/phase-5-vault-completion.md) — milestones M1–M7.
+**Detailed execution plan:** [`plans/phase-5-vault-completion.md`](plans/phase-5-vault-completion.md) — milestones M1–M7. Manual verification surfaced a third real-world dynamically-rendered-page case (a Clerk-based third-party login widget defeating Fill's snapshot-based form lookup, on top of Phase 4's Figma/SignupGenius cases) — carried forward to Phase 9 alongside the other two, not patched here.
 
 ---
 
@@ -549,14 +549,14 @@ Model B must not be assumed safer than Model A by default — that needs to be d
 - [x] Local encrypted vault
 - [x] Root identity
 - [x] Service identities
-- [ ] Unique credentials (storage exists; generation/capture UI is Phase 5)
+- [x] Unique credentials (generator, capture, save, and plain fill all reachable via the popup as of Phase 5 — fill has a known gap on dynamically-rendered login forms, see Phase 5's own plan)
 - [x] Form detection
 - [x] Field classification
 - [x] Required/optional detection
 - [x] Optional fields blocked by default
 - [x] User approval
-- [ ] Real data (backend exists; needs Phase 5's Personal Data UI to actually be reachable)
-- [ ] Alias data (locally deterministic as of Phase 5; a real deliverable address needs Phase 9's provider integration)
+- [x] Real data (reachable via the popup's Personal Data screen as of Phase 5)
+- [ ] Alias data (Synthetic is now locally deterministic per site as of Phase 5; a real deliverable Alias address still needs Phase 9's provider integration)
 - [x] Synthetic data
 - [x] Denial
 - [x] Sensitive-data classification
