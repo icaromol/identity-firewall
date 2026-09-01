@@ -46,11 +46,12 @@ export async function handleFormDetected(
       continue;
     }
 
-    const result = computeAutoApply(origin, form, {
+    const result = await computeAutoApply(origin, form, {
       policies: autoApplyInputs.policies,
       personalData: autoApplyInputs.personalData,
       isHighTrustOrigin: autoApplyInputs.isHighTrustOrigin(origin),
       aliasProviderConfigured: autoApplyInputs.aliasProviderConfigured,
+      rootSecret: autoApplyInputs.rootSecret,
     });
 
     if (!result.fullyResolved) {

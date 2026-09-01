@@ -1,15 +1,22 @@
 // Pure logic for Phase 4's automation path -- decides, for one classified
 // form, whether every recognized field has a non-'ask' policy action and,
 // if so, what values to autofill and what the resulting PrivacyLedger
-// entry should record. No I/O here (no storage reads, no tabs.sendMessage)
-// -- background/formDetection/handler.ts is the thin orchestrator that
-// calls this with data it already read, then performs the actual relay
-// and ledger write. See docs/plans/phase-4-privacy-ledger-policy-engine.md's
-// design decision 4: fully automatic when every recognized field resolves,
-// otherwise Phase 3's popup flow takes over exactly as before.
+// entry should record. No STORAGE I/O here (background/formDetection/
+// handler.ts is the thin orchestrator that calls this with data it
+// already read, then performs the actual relay and ledger write) -- see
+// docs/plans/phase-4-privacy-ledger-policy-engine.md's design decision 4:
+// fully automatic when every recognized field resolves, otherwise Phase
+// 3's popup flow takes over exactly as before.
+//
+// async since ADR-016 (Phase 5 M6): a Synthetic value now derives
+// deterministically via Web Crypto's HKDF (generateResponseValue's own
+// header comment), which has no synchronous form. This is the one way
+// this function is no longer strictly "no I/O" -- crypto.subtle's own
+// async-only API, not a storage/network read.
 
 import { getFieldKey } from '../../shared/fieldKey';
 import type { ClassifiedForm } from '../../shared/messages';
+import { normalizeOrigin } from '../../shared/origin';
 import type {
   PersonalData,
   PersonalDataFieldName,
@@ -37,14 +44,20 @@ export interface AutoApplyContext {
   personalData: PersonalData;
   isHighTrustOrigin: boolean;
   aliasProviderConfigured: boolean;
+  // Phase 5 M6 -- needed only for a 'synthetic' resolution's deterministic
+  // derivation (ADR-016). Threaded through from the same already-fetched
+  // vault index this context's other fields come from -- no extra storage
+  // read.
+  rootSecret: Uint8Array;
 }
 
-export function computeAutoApply(
+export async function computeAutoApply(
   origin: string,
   form: ClassifiedForm,
   context: AutoApplyContext,
-): AutoApplyResult {
-  const { policies, personalData, isHighTrustOrigin, aliasProviderConfigured } = context;
+): Promise<AutoApplyResult> {
+  const { policies, personalData, isHighTrustOrigin, aliasProviderConfigured, rootSecret } =
+    context;
 
   const recognized = form.fields
     .map((field, index) => ({ field, key: getFieldKey(field, index) }))
@@ -111,7 +124,13 @@ export function computeAutoApply(
     // returns null in that case, same as it would for a manual 'real'
     // choice with nothing on file. Treated as denied: there's nothing
     // honest to disclose.
-    const value = generateResponseValue(r.field.fieldType, responseType, personalData);
+    const value = await generateResponseValue(
+      r.field.fieldType,
+      responseType,
+      personalData,
+      normalizeOrigin(origin),
+      rootSecret,
+    );
     if (value === null) {
       deniedFields.push(r.field.fieldType);
       continue;

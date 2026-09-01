@@ -1,4 +1,5 @@
 import { browser } from 'wxt/browser';
+import { base64ToBytes } from '../../shared/bytes';
 import { getFieldKey } from '../../shared/fieldKey';
 import type {
   AutofillFieldsMessage,
@@ -31,6 +32,10 @@ async function loadPolicyContext() {
     policies: index.policies,
     aliasProviderConfigured: index.aliasProviderConfig.provider !== 'none',
     isHighTrustOrigin: (origin: string) => normalizedHighTrust.has(normalizeOrigin(origin)),
+    // Phase 5 M6 -- ADR-016's deterministic Synthetic derivation needs
+    // this. Extracted from the same already-fetched index, not a second
+    // read.
+    rootSecret: base64ToBytes(index.rootIdentity.rootSecretB64),
   };
 }
 
@@ -156,8 +161,13 @@ export async function handleSubmitFieldDecisions(
   const disclosedFields: Partial<Record<PersonalDataFieldName, ResponseType>> = {};
   const deniedFields: PersonalDataFieldName[] = [];
 
-  form.fields.forEach((field, fieldIndex) => {
-    if (!field.fieldType) return;
+  // for...of, not .forEach() -- a Synthetic value's derivation (ADR-016)
+  // needs to be awaited now, which an async callback passed to forEach
+  // would silently NOT do (forEach never awaits its callback's returned
+  // promise), letting this function return before every field actually
+  // finished resolving.
+  for (const [fieldIndex, field] of form.fields.entries()) {
+    if (!field.fieldType) continue;
     requestedFields.push(field.fieldType);
 
     const key = getFieldKey(field, fieldIndex);
@@ -167,7 +177,7 @@ export async function handleSubmitFieldDecisions(
     // about me" should reflect that nothing was handed over either way.
     if (!responseType || responseType === 'deny') {
       deniedFields.push(field.fieldType);
-      return;
+      continue;
     }
 
     const hasRealValue = personalData[field.fieldType] !== undefined;
@@ -178,14 +188,20 @@ export async function handleSubmitFieldDecisions(
       );
     }
 
-    const value = generateResponseValue(field.fieldType, responseType, personalData);
+    const value = await generateResponseValue(
+      field.fieldType,
+      responseType,
+      personalData,
+      normalizeOrigin(origin),
+      policyContext.rootSecret,
+    );
     if (value !== null) {
       resolvedValues[key] = value;
       disclosedFields[field.fieldType] = responseType;
     } else {
       deniedFields.push(field.fieldType);
     }
-  });
+  }
 
   const autofillMessage: AutofillFieldsMessage = {
     type: 'AUTOFILL_FIELDS',

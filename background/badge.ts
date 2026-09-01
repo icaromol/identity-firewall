@@ -9,6 +9,7 @@
 // rather than each caller keeping its own partial view.
 
 import { browser } from 'wxt/browser';
+import { base64ToBytes } from '../shared/bytes';
 import { normalizeOrigin } from '../shared/origin';
 import { getHighTrustOrigins, getPolicies } from './policy/storage';
 import { getSessionState } from './session/state';
@@ -26,6 +27,10 @@ export async function tryLoadAutoApplyInputs(): Promise<
       personalData: Awaited<ReturnType<typeof getPersonalData>>;
       isHighTrustOrigin: (origin: string) => boolean;
       aliasProviderConfigured: boolean;
+      // Phase 5 M6 -- ADR-016's deterministic Synthetic derivation needs
+      // this. Extracted from the same already-fetched vault index below,
+      // not a second read.
+      rootSecret: Uint8Array;
     }
   | undefined
 > {
@@ -42,6 +47,7 @@ export async function tryLoadAutoApplyInputs(): Promise<
       personalData,
       isHighTrustOrigin: (origin: string) => normalizedHighTrust.has(normalizeOrigin(origin)),
       aliasProviderConfigured: index.aliasProviderConfig.provider !== 'none',
+      rootSecret: base64ToBytes(index.rootIdentity.rootSecretB64),
     };
   } catch {
     return undefined;
