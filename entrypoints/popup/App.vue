@@ -195,8 +195,11 @@ async function submitUnlockPassphrase() {
 
       <!-- No "Approve all" button -- Phase 4's Policy Engine pre-fills
            every field it can resolve automatically the moment this list
-           loads (fetchPendingRequest); only fields the engine itself left
-           at 'ask' show a blank "Choose…" picker below. -->
+           loads (fetchPendingRequest); a field the engine itself left at
+           'ask' still gets a starting selection below -- 'deny', the most
+           privacy-preserving option -- rather than a blank "Choose…"
+           picker (stores/firewall.store.ts's applyPendingRequestData).
+           The user still sees and can change it before Submit. -->
       <div v-else class="mt-2 space-y-4">
         <div class="flex gap-2">
           <button

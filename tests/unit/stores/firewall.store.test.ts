@@ -107,7 +107,7 @@ describe('useFirewallStore', () => {
     expect(store.getDecision(0, newsletterKey)).toBeUndefined(); // fieldType null -- untouched
   });
 
-  it('leaves a field blank (no pre-filled decision) when the Policy Engine resolves it to "ask"', async () => {
+  it('defaults a field left at "ask" to \'deny\' -- the most privacy-preserving available response -- instead of leaving it blank', async () => {
     mockActiveTab();
     vi.spyOn(fakeBrowser.runtime, 'sendMessage').mockResolvedValueOnce({
       ok: true,
@@ -121,7 +121,59 @@ describe('useFirewallStore', () => {
     const store = useFirewallStore();
     await store.fetchPendingRequest();
 
+    expect(store.getDecision(0, emailKey)).toBe('deny');
+  });
+
+  it('does not default an "ask" field to deny when its availableResponses somehow omits deny', async () => {
+    mockActiveTab();
+    vi.spyOn(fakeBrowser.runtime, 'sendMessage').mockResolvedValueOnce({
+      ok: true,
+      data: {
+        forms: sampleForms,
+        availableResponses: { email: ['real'] }, // malformed/incomplete on purpose
+        resolvedActions: { email: 'ask' },
+      },
+    } as never);
+
+    const store = useFirewallStore();
+    await store.fetchPendingRequest();
+
     expect(store.getDecision(0, emailKey)).toBeUndefined();
+  });
+
+  it('a manual choice for a field still left at "ask" survives a refresh, even though it started at the deny default', async () => {
+    mockActiveTab();
+    vi.spyOn(fakeBrowser.runtime, 'sendMessage')
+      .mockResolvedValueOnce({
+        ok: true,
+        data: {
+          forms: sampleForms,
+          availableResponses: { email: ['real', 'synthetic', 'deny'] },
+          resolvedActions: {}, // ask -- defaults to 'deny'
+          isHighTrustOrigin: false,
+        },
+      } as never)
+      .mockResolvedValueOnce({ ok: true, data: ['https://example.com'] } as never)
+      .mockResolvedValueOnce({
+        ok: true,
+        data: {
+          forms: sampleForms,
+          availableResponses: { email: ['real', 'synthetic', 'deny'] },
+          resolvedActions: {}, // still ask after the refresh
+          isHighTrustOrigin: true,
+        },
+      } as never);
+
+    const store = useFirewallStore();
+    await store.fetchPendingRequest();
+    expect(store.getDecision(0, emailKey)).toBe('deny'); // the default
+
+    store.setDecision(0, emailKey, 'synthetic'); // the user's own manual override
+    await store.toggleHighTrust();
+
+    // Must still be the user's choice, not silently reset back to the
+    // 'deny' default by the refresh's autoFilledKeys-clearing loop.
+    expect(store.getDecision(0, emailKey)).toBe('synthetic');
   });
 
   it('applyDenyOptional only touches non-required fields', async () => {

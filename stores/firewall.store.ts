@@ -108,17 +108,45 @@ export const useFirewallStore = defineStore('firewall', {
 
       // Pre-fill every field whose Policy Engine resolution is anything
       // but 'ask' -- "only asks what falls outside the rules"
-      // (privacy-model.md). A field resolving to 'ask' is left blank,
-      // needing the user's own choice, exactly as Phase 3 always worked
-      // before any policy existed.
+      // (privacy-model.md).
+      //
+      // A field left at 'ask' still gets a starting selection rather than
+      // a blank "Choose…" picker: 'deny' is the most privacy-preserving
+      // response and is unconditionally present in every
+      // responseAvailability.ts outcome, so defaulting to it here never
+      // silently discloses anything -- the user still sees the picker and
+      // must still click Submit, and can change the selection to anything
+      // else availableResponses allows before doing so. This is a
+      // presentational default only, not a Policy Engine decision: an
+      // 'ask' field never auto-submits the way a resolved one effectively
+      // does once every field on a form has a decision.
+      //
+      // Only applied when the field has no decision yet (`undefined`) --
+      // a manual choice the user already made for a field that's STILL
+      // 'ask' after a refresh (e.g. toggling safe mode) must survive
+      // exactly like an auto-filled one does above, not get silently
+      // reset back to 'deny'. setDecision() removes a key from
+      // autoFilledKeys the moment the user picks anything by hand, so the
+      // clearing loop above never wipes a manual choice out from under
+      // this check.
       for (const form of this.forms) {
         form.fields.forEach((field, index) => {
           if (!field.fieldType) return;
+          const key = compoundKey(form.formIndex, getFieldKey(field, index));
           const resolved = this.resolvedActions[field.fieldType];
+
           if (resolved && resolved !== 'ask') {
-            const key = compoundKey(form.formIndex, getFieldKey(field, index));
             this.decisions[key] = resolved;
             this.autoFilledKeys.add(key);
+            return;
+          }
+
+          if (this.decisions[key] === undefined) {
+            const options = this.availableResponses[field.fieldType] ?? [];
+            if (options.includes('deny')) {
+              this.decisions[key] = 'deny';
+              this.autoFilledKeys.add(key);
+            }
           }
         });
       }
@@ -212,7 +240,15 @@ export const useFirewallStore = defineStore('firewall', {
     },
 
     setDecision(formIndex: number, fieldKey: string, responseType: ResponseType): void {
-      this.decisions[compoundKey(formIndex, fieldKey)] = responseType;
+      const key = compoundKey(formIndex, fieldKey);
+      this.decisions[key] = responseType;
+      // A manual choice (including re-picking the same value a default
+      // already selected) is no longer this store's own default -- without
+      // this, a later refresh's autoFilledKeys-clearing loop in
+      // applyPendingRequestData would wipe it out again, since it has no
+      // way to tell "the user chose this" apart from "this store defaulted
+      // it" once both are sitting in the same `decisions` map.
+      this.autoFilledKeys.delete(key);
     },
 
     // A manual quick-action for the fields the Policy Engine itself left
