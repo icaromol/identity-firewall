@@ -24,8 +24,27 @@
 // Submit, credential Confirm/Discard/Fill) -- reserved for transient,
 // already-succeeded confirmations; an error a user needs to actually read
 // stays inline near its control, unchanged from before.
-import { computed, onMounted, ref } from 'vue';
+// Every icon here is a real component reference -- either returned
+// directly from vaultStatusIcon below (a genuine script-level use Biome
+// already sees fine on its own) or passed as a template binding
+// (:icon="Bell", <Check />, etc.), which Biome's <script>-only lint pass
+// can't see, hence the blanket ignore below for the whole import.
 // biome-ignore-start lint/correctness/noUnusedImports: used in <template> -- Biome only lints the <script> block, it can't see template usage.
+import {
+  Bell,
+  Check,
+  Globe,
+  Key,
+  KeyRound,
+  Lock,
+  LockOpen,
+  Save,
+  ScrollText,
+  Shield,
+  TriangleAlert,
+  X,
+} from '@lucide/vue';
+import { computed, onMounted, ref } from 'vue';
 import UiButton from '../../components/ui/UiButton.vue';
 import UiSection from '../../components/ui/UiSection.vue';
 import UiSpinner from '../../components/ui/UiSpinner.vue';
@@ -54,6 +73,22 @@ const toast = useToastStore();
 
 // biome-ignore lint/correctness/noUnusedVariables: read from <template> -- Biome only lints the <script> block, it can't see template usage.
 const ledgerSummary = computed(() => summarizeLedgerEntries(privacyLedger.entries));
+
+// A persistent, at-a-glance vault-state icon in the header -- independent
+// of the Vault section's own detailed cards below, which a user shouldn't
+// have to scroll to just to know "am I locked right now?" No overlapping
+// label text: the Vault section below already owns the literal strings
+// "Vault unlocked."/"Vault is locked." (which tests/e2e/vaultLifecycle.test.ts
+// and others assert on), and Playwright's non-exact getByText matches
+// substrings -- a second element repeating that same text would trip a
+// strict-mode "resolved to 2 elements" violation (the exact class of bug
+// Phase 6's v-show/v-if fix caught).
+// biome-ignore lint/correctness/noUnusedVariables: read from <template> -- Biome only lints the <script> block, it can't see template usage.
+const vaultStatusIcon = computed(() => {
+  if (vault.status !== 'loaded') return null;
+  if (!vault.initialized) return KeyRound;
+  return vault.locked ? Lock : LockOpen;
+});
 
 const setupPassphrase = ref('');
 const unlockPassphrase = ref('');
@@ -202,273 +237,25 @@ async function submitUnlockPassphrase() {
   <main class="p-4 text-sm text-neutral-100 bg-neutral-900">
     <UiToastHost />
 
-    <h1 class="text-base font-semibold">Identity Firewall</h1>
-
-    <UiSection title="Sites detected this session" :divider="false">
-      <!-- 'idle' (fetch hasn't run/completed yet) shares this branch with
-           'loading', rather than falling through to the final v-else --
-           otherwise a broken onMounted wiring would render identically to
-           a genuinely empty session instead of visibly doing nothing. -->
-      <p
-        v-if="session.status === 'idle' || session.status === 'loading'"
-        class="mt-2 flex items-center gap-2 text-neutral-400"
+    <div class="flex items-center justify-between">
+      <h1 class="flex items-center gap-1.5 text-base font-semibold">
+        <Shield class="h-4 w-4" aria-hidden="true" /> Identity Firewall
+      </h1>
+      <span
+        v-if="vaultStatusIcon"
+        :title="
+          !vault.initialized
+            ? 'Vault not set up'
+            : vault.locked
+              ? 'Vault is locked'
+              : 'Vault is unlocked'
+        "
       >
-        <UiSpinner size="sm" /> Loading…
-      </p>
+        <component :is="vaultStatusIcon" class="h-4 w-4 text-neutral-400" aria-hidden="true" />
+      </span>
+    </div>
 
-      <p v-else-if="session.status === 'error'" class="mt-2 text-red-400">
-        Could not load session state: {{ session.error }}
-      </p>
-
-      <ul v-else-if="session.originsWithForms.length > 0" class="mt-2 space-y-1">
-        <li
-          v-for="entry in session.originsWithForms"
-          :key="entry.origin"
-          class="flex items-center justify-between"
-        >
-          <span>{{ entry.origin }}</span>
-          <span class="text-neutral-400">{{ entry.formCount }} form(s)</span>
-        </li>
-      </ul>
-
-      <p v-else class="mt-2 text-neutral-400">No forms detected yet this session.</p>
-    </UiSection>
-
-    <UiSection :title="`Pending request${firewall.origin ? ` — ${firewall.origin}` : ''}`">
-      <!-- Government/financial safe mode (Phase 4 M6) -- a standing
-           per-site setting, shown whenever the origin is known regardless
-           of whether a request happens to be pending right now. -->
-      <label
-        v-if="firewall.origin"
-        class="mt-2 flex items-center gap-2 text-xs text-neutral-400"
-      >
-        <input
-          type="checkbox"
-          :checked="firewall.isHighTrustOrigin"
-          :disabled="firewall.togglingHighTrust"
-          @change="toggleHighTrust()"
-        />
-        Treat this site as government/financial (always ask, ignore policies)
-      </label>
-
-      <p v-if="firewall.highTrustError" class="mt-1 text-xs text-red-400">
-        {{ firewall.highTrustError }}
-      </p>
-
-      <p v-if="firewall.isHighTrustOrigin" class="mt-2 text-amber-400">
-        ⚠️ This site has been identified as a government/financial service. Automatic identity
-        autofill has been disabled.
-      </p>
-
-      <p
-        v-if="firewall.status === 'idle' || firewall.status === 'loading'"
-        class="mt-2 flex items-center gap-2 text-neutral-400"
-      >
-        <UiSpinner size="sm" /> Loading…
-      </p>
-
-      <p v-else-if="firewall.status === 'error'" class="mt-2 text-red-400">
-        Could not load pending request: {{ firewall.error }}
-      </p>
-
-      <!-- Requires PersonalData, which requires an unlocked vault --
-           handleGetPendingRequest throws VaultLockedError otherwise,
-           surfaced here as a plain error string rather than a crash. -->
-      <p v-else-if="firewall.forms.length === 0" class="mt-2 text-neutral-400">
-        Nothing pending for this tab.
-      </p>
-
-      <!-- No "Approve all" button -- Phase 4's Policy Engine pre-fills
-           every field it can resolve automatically the moment this list
-           loads (fetchPendingRequest); a field the engine itself left at
-           'ask' still gets a starting selection below -- 'deny', the most
-           privacy-preserving option -- rather than a blank "Choose…"
-           picker (stores/firewall.store.ts's applyPendingRequestData).
-           The user still sees and can change it before Submit. -->
-      <div v-else class="mt-2 space-y-4">
-        <div class="flex gap-2">
-          <UiButton variant="secondary" size="sm" :block="false" @click="clickDenyOptional()">
-            Deny optional fields
-          </UiButton>
-        </div>
-
-        <div
-          v-for="form in firewall.forms"
-          :key="form.formIndex"
-          class="space-y-2 rounded border border-neutral-800 p-2"
-        >
-          <ul class="space-y-1">
-            <li
-              v-for="entry in fieldEntries(form)"
-              :key="entry.key"
-              class="flex items-center justify-between gap-2"
-            >
-              <div>
-                <span>{{ entry.field.fieldType }}</span>
-                <span class="ml-1 text-xs text-neutral-500">{{ entry.field.sensitivity }}</span>
-                <span v-if="!entry.field.apparentlyRequired" class="ml-1 text-xs text-neutral-500"
-                  >(optional)</span
-                >
-              </div>
-              <select
-                class="rounded border border-neutral-700 bg-neutral-800 px-1 py-0.5 text-xs text-neutral-100"
-                :value="firewall.getDecision(form.formIndex, entry.key) ?? ''"
-                @change="onDecisionChange(form.formIndex, entry.key, $event)"
-              >
-                <option value="" disabled>Choose…</option>
-                <option
-                  v-for="r in firewall.availableResponses[entry.field.fieldType!] ?? []"
-                  :key="r"
-                  :value="r"
-                >
-                  {{ r }}
-                </option>
-              </select>
-            </li>
-          </ul>
-
-          <UiButton
-            :loading="firewall.submittingFormIndex === form.formIndex"
-            @click="clickSubmitForm(form.formIndex)"
-          >
-            Submit
-          </UiButton>
-          <p v-if="firewall.submitErrors[form.formIndex]" class="text-xs text-red-400">
-            {{ firewall.submitErrors[form.formIndex] }}
-          </p>
-        </div>
-      </div>
-    </UiSection>
-
-    <UiSection
-      v-if="pendingCredential.pending"
-      :title="`Save this login${pendingCredential.origin ? ` — ${pendingCredential.origin}` : ''}?`"
-    >
-      <div class="mt-2 space-y-2">
-        <p class="text-neutral-300">
-          {{ pendingCredential.pending.identifier ?? '(no username/email detected)' }}
-        </p>
-        <input
-          :value="pendingCredential.pending.password"
-          type="password"
-          readonly
-          class="w-full rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-neutral-100"
-        />
-        <div class="flex gap-2">
-          <UiButton
-            class="flex-1"
-            :block="false"
-            :loading="pendingCredential.confirming"
-            @click="clickConfirmCredential()"
-          >
-            Save
-          </UiButton>
-          <UiButton
-            class="flex-1"
-            :block="false"
-            variant="secondary"
-            :loading="pendingCredential.discarding"
-            @click="clickDiscardCredential()"
-          >
-            Discard
-          </UiButton>
-        </div>
-        <p v-if="pendingCredential.actionError" class="text-xs text-red-400">
-          {{ pendingCredential.actionError }}
-        </p>
-      </div>
-    </UiSection>
-
-    <UiSection
-      :title="`Saved logins${savedCredentials.origin ? ` — ${savedCredentials.origin}` : ''}`"
-    >
-      <p
-        v-if="savedCredentials.status === 'idle' || savedCredentials.status === 'loading'"
-        class="mt-2 flex items-center gap-2 text-neutral-400"
-      >
-        <UiSpinner size="sm" /> Loading…
-      </p>
-
-      <p v-else-if="savedCredentials.status === 'error'" class="mt-2 text-red-400">
-        {{ savedCredentials.error }}
-      </p>
-
-      <p v-else-if="savedCredentials.credentials.length === 0" class="mt-2 text-neutral-400">
-        Nothing saved for this site yet.
-      </p>
-
-      <div v-else class="mt-2 space-y-2">
-        <ul class="space-y-2">
-          <li
-            v-for="credential in savedCredentials.credentials"
-            :key="credential.kind"
-            class="space-y-1 rounded border border-neutral-800 p-2"
-          >
-            <template v-if="credential.kind === 'password'">
-              <p class="text-neutral-300">{{ credential.username ?? '(no username)' }}</p>
-              <!-- type="text", not "password" -- decision 3 (the plan)
-                   requires this list to show what's saved plainly, no
-                   masking; that's Phase 8's job, once there's a proper
-                   in-page reveal-preview to build instead. -->
-              <input
-                :value="credential.password"
-                type="text"
-                readonly
-                class="w-full rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-neutral-100"
-              />
-              <UiButton
-                variant="secondary"
-                :loading="savedCredentials.filling === credential"
-                @click="clickFillCredential(credential)"
-              >
-                Fill
-              </UiButton>
-            </template>
-            <p v-else class="text-neutral-400">Passkey (not fillable this way)</p>
-          </li>
-        </ul>
-        <p v-if="savedCredentials.fillError" class="text-xs text-red-400">
-          {{ savedCredentials.fillError }}
-        </p>
-      </div>
-    </UiSection>
-
-    <UiSection
-      :title="`What this site knows about you${privacyLedger.origin ? ` — ${privacyLedger.origin}` : ''}`"
-    >
-      <p
-        v-if="privacyLedger.status === 'idle' || privacyLedger.status === 'loading'"
-        class="mt-2 flex items-center gap-2 text-neutral-400"
-      >
-        <UiSpinner size="sm" /> Loading…
-      </p>
-
-      <p v-else-if="privacyLedger.status === 'error'" class="mt-2 text-red-400">
-        {{ privacyLedger.error }}
-      </p>
-
-      <p
-        v-else-if="ledgerSummary.disclosed.size === 0 && ledgerSummary.denied.size === 0"
-        class="mt-2 text-neutral-400"
-      >
-        No history for this site yet.
-      </p>
-
-      <div v-else class="mt-2 space-y-1">
-        <p v-for="[field, responseType] in ledgerSummary.disclosed" :key="`d-${field}`">
-          <span class="text-green-400">✓</span> {{ field }}
-          <span class="text-neutral-500">({{ responseType }})</span>
-        </p>
-        <p v-for="field in ledgerSummary.denied" :key="`x-${field}`">
-          <span class="text-red-400">✕</span> {{ field }}
-        </p>
-        <p v-if="ledgerSummary.lastAccess" class="mt-2 text-xs text-neutral-500">
-          Last access: {{ new Date(ledgerSummary.lastAccess).toLocaleString() }}
-        </p>
-      </div>
-    </UiSection>
-
-    <UiSection title="Vault">
+    <UiSection title="Vault" :icon="Key" :divider="false">
       <p class="mt-1 text-xs text-neutral-500">
         Personal data and backup/recovery have moved to the extension's Dashboard page
         (right-click the extension icon → Options).
@@ -574,6 +361,312 @@ async function submitUnlockPassphrase() {
           Lock
         </UiButton>
       </div>
+    </UiSection>
+
+    <!-- The header icon already gives an at-a-glance lock state; the four
+         sections below are about a SPECIFIC SITE, so none of them are
+         meaningful until the vault actually holds something to disclose.
+         'VAULT_LOCKED' is specifically softened here (a muted note, not a
+         red error) since it's an expected, common state, not a failure --
+         any OTHER error (e.g. the tab-resolution failure
+         tests/e2e/firewallApproval.test.ts exercises) still renders in the
+         normal red-error style below, unchanged. -->
+    <UiSection
+      :title="`Pending request${firewall.origin ? ` — ${firewall.origin}` : ''}`"
+      :icon="Bell"
+      :class="firewall.forms.length > 0 ? 'border-l-2 border-amber-500/60 pl-2 -ml-2' : ''"
+    >
+      <!-- Government/financial safe mode (Phase 4 M6) -- a standing
+           per-site setting, shown whenever the origin is known regardless
+           of whether a request happens to be pending right now. -->
+      <label
+        v-if="firewall.origin"
+        class="mt-2 flex items-center gap-2 text-xs text-neutral-400"
+      >
+        <input
+          type="checkbox"
+          :checked="firewall.isHighTrustOrigin"
+          :disabled="firewall.togglingHighTrust"
+          @change="toggleHighTrust()"
+        />
+        Treat this site as government/financial (always ask, ignore policies)
+      </label>
+
+      <p v-if="firewall.highTrustError" class="mt-1 text-xs text-red-400">
+        {{ firewall.highTrustError }}
+      </p>
+
+      <p v-if="firewall.isHighTrustOrigin" class="mt-2 flex items-start gap-1.5 text-amber-400">
+        <TriangleAlert class="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+        This site has been identified as a government/financial service. Automatic identity
+        autofill has been disabled.
+      </p>
+
+      <p
+        v-if="firewall.status === 'idle' || firewall.status === 'loading'"
+        class="mt-2 flex items-center gap-2 text-neutral-400"
+      >
+        <UiSpinner size="sm" /> Loading…
+      </p>
+
+      <p
+        v-else-if="firewall.status === 'error' && firewall.error === 'VAULT_LOCKED'"
+        class="mt-2 text-neutral-500"
+      >
+        Set up your vault above to see this.
+      </p>
+
+      <p v-else-if="firewall.status === 'error'" class="mt-2 text-red-400">
+        Could not load pending request: {{ firewall.error }}
+      </p>
+
+      <!-- Requires PersonalData, which requires an unlocked vault --
+           handleGetPendingRequest throws VaultLockedError otherwise,
+           surfaced here as a plain error string rather than a crash. -->
+      <p v-else-if="firewall.forms.length === 0" class="mt-2 text-neutral-400">
+        Nothing pending for this tab.
+      </p>
+
+      <!-- No "Approve all" button -- Phase 4's Policy Engine pre-fills
+           every field it can resolve automatically the moment this list
+           loads (fetchPendingRequest); a field the engine itself left at
+           'ask' still gets a starting selection below -- 'deny', the most
+           privacy-preserving option -- rather than a blank "Choose…"
+           picker (stores/firewall.store.ts's applyPendingRequestData).
+           The user still sees and can change it before Submit. -->
+      <div v-else class="mt-2 space-y-4">
+        <div class="flex gap-2">
+          <UiButton variant="secondary" size="sm" :block="false" @click="clickDenyOptional()">
+            Deny optional fields
+          </UiButton>
+        </div>
+
+        <div
+          v-for="form in firewall.forms"
+          :key="form.formIndex"
+          class="space-y-2 rounded border border-neutral-800 p-2"
+        >
+          <ul class="space-y-1">
+            <li
+              v-for="entry in fieldEntries(form)"
+              :key="entry.key"
+              class="flex items-center justify-between gap-2"
+            >
+              <div>
+                <span>{{ entry.field.fieldType }}</span>
+                <span class="ml-1 text-xs text-neutral-500">{{ entry.field.sensitivity }}</span>
+                <span v-if="!entry.field.apparentlyRequired" class="ml-1 text-xs text-neutral-500"
+                  >(optional)</span
+                >
+              </div>
+              <select
+                class="rounded border border-neutral-700 bg-neutral-800 px-1 py-0.5 text-xs text-neutral-100"
+                :value="firewall.getDecision(form.formIndex, entry.key) ?? ''"
+                @change="onDecisionChange(form.formIndex, entry.key, $event)"
+              >
+                <option value="" disabled>Choose…</option>
+                <option
+                  v-for="r in firewall.availableResponses[entry.field.fieldType!] ?? []"
+                  :key="r"
+                  :value="r"
+                >
+                  {{ r }}
+                </option>
+              </select>
+            </li>
+          </ul>
+
+          <UiButton
+            :loading="firewall.submittingFormIndex === form.formIndex"
+            @click="clickSubmitForm(form.formIndex)"
+          >
+            Submit
+          </UiButton>
+          <p v-if="firewall.submitErrors[form.formIndex]" class="text-xs text-red-400">
+            {{ firewall.submitErrors[form.formIndex] }}
+          </p>
+        </div>
+      </div>
+    </UiSection>
+
+    <UiSection
+      v-if="pendingCredential.pending"
+      :title="`Save this login${pendingCredential.origin ? ` — ${pendingCredential.origin}` : ''}?`"
+      :icon="Save"
+      class="border-l-2 border-amber-500/60 pl-2 -ml-2"
+    >
+      <div class="mt-2 space-y-2">
+        <p class="text-neutral-300">
+          {{ pendingCredential.pending.identifier ?? '(no username/email detected)' }}
+        </p>
+        <input
+          :value="pendingCredential.pending.password"
+          type="password"
+          readonly
+          class="w-full rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-neutral-100"
+        />
+        <div class="flex gap-2">
+          <UiButton
+            class="flex-1"
+            :block="false"
+            :loading="pendingCredential.confirming"
+            @click="clickConfirmCredential()"
+          >
+            Save
+          </UiButton>
+          <UiButton
+            class="flex-1"
+            :block="false"
+            variant="secondary"
+            :loading="pendingCredential.discarding"
+            @click="clickDiscardCredential()"
+          >
+            Discard
+          </UiButton>
+        </div>
+        <p v-if="pendingCredential.actionError" class="text-xs text-red-400">
+          {{ pendingCredential.actionError }}
+        </p>
+      </div>
+    </UiSection>
+
+    <UiSection
+      :title="`Saved logins${savedCredentials.origin ? ` — ${savedCredentials.origin}` : ''}`"
+      :icon="KeyRound"
+    >
+      <p
+        v-if="savedCredentials.status === 'idle' || savedCredentials.status === 'loading'"
+        class="mt-2 flex items-center gap-2 text-neutral-400"
+      >
+        <UiSpinner size="sm" /> Loading…
+      </p>
+
+      <p
+        v-else-if="savedCredentials.status === 'error' && savedCredentials.error === 'VAULT_LOCKED'"
+        class="mt-2 text-neutral-500"
+      >
+        Set up your vault above to see this.
+      </p>
+
+      <p v-else-if="savedCredentials.status === 'error'" class="mt-2 text-red-400">
+        {{ savedCredentials.error }}
+      </p>
+
+      <p v-else-if="savedCredentials.credentials.length === 0" class="mt-2 text-neutral-400">
+        Nothing saved for this site yet.
+      </p>
+
+      <div v-else class="mt-2 space-y-2">
+        <ul class="space-y-2">
+          <li
+            v-for="credential in savedCredentials.credentials"
+            :key="credential.kind"
+            class="space-y-1 rounded border border-neutral-800 p-2"
+          >
+            <template v-if="credential.kind === 'password'">
+              <p class="text-neutral-300">{{ credential.username ?? '(no username)' }}</p>
+              <!-- type="text", not "password" -- decision 3 (the plan)
+                   requires this list to show what's saved plainly, no
+                   masking; that's Phase 8's job, once there's a proper
+                   in-page reveal-preview to build instead. -->
+              <input
+                :value="credential.password"
+                type="text"
+                readonly
+                class="w-full rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-neutral-100"
+              />
+              <UiButton
+                variant="secondary"
+                :loading="savedCredentials.filling === credential"
+                @click="clickFillCredential(credential)"
+              >
+                Fill
+              </UiButton>
+            </template>
+            <p v-else class="text-neutral-400">Passkey (not fillable this way)</p>
+          </li>
+        </ul>
+        <p v-if="savedCredentials.fillError" class="text-xs text-red-400">
+          {{ savedCredentials.fillError }}
+        </p>
+      </div>
+    </UiSection>
+
+    <UiSection
+      :title="`What this site knows about you${privacyLedger.origin ? ` — ${privacyLedger.origin}` : ''}`"
+      :icon="ScrollText"
+    >
+      <p
+        v-if="privacyLedger.status === 'idle' || privacyLedger.status === 'loading'"
+        class="mt-2 flex items-center gap-2 text-neutral-400"
+      >
+        <UiSpinner size="sm" /> Loading…
+      </p>
+
+      <p
+        v-else-if="privacyLedger.status === 'error' && privacyLedger.error === 'VAULT_LOCKED'"
+        class="mt-2 text-neutral-500"
+      >
+        Set up your vault above to see this.
+      </p>
+
+      <p v-else-if="privacyLedger.status === 'error'" class="mt-2 text-red-400">
+        {{ privacyLedger.error }}
+      </p>
+
+      <p
+        v-else-if="ledgerSummary.disclosed.size === 0 && ledgerSummary.denied.size === 0"
+        class="mt-2 text-neutral-400"
+      >
+        No history for this site yet.
+      </p>
+
+      <div v-else class="mt-2 space-y-1">
+        <p v-for="[field, responseType] in ledgerSummary.disclosed" :key="`d-${field}`" class="flex items-center gap-1.5">
+          <Check class="h-3.5 w-3.5 text-green-400" aria-hidden="true" /> {{ field }}
+          <span class="text-neutral-500">({{ responseType }})</span>
+        </p>
+        <p v-for="field in ledgerSummary.denied" :key="`x-${field}`" class="flex items-center gap-1.5">
+          <X class="h-3.5 w-3.5 text-red-400" aria-hidden="true" /> {{ field }}
+        </p>
+        <p v-if="ledgerSummary.lastAccess" class="mt-2 text-xs text-neutral-500">
+          Last access: {{ new Date(ledgerSummary.lastAccess).toLocaleString() }}
+        </p>
+      </div>
+    </UiSection>
+
+    <!-- Session-wide activity log, not scoped to any one site -- the
+         least actionable section here, so it's last and visually quieter
+         (opacity, no icon-matched accent) rather than competing for the
+         same attention as the decision-needed sections above. -->
+    <UiSection title="Sites detected this session" :icon="Globe" class="opacity-70">
+      <!-- 'idle' (fetch hasn't run/completed yet) shares this branch with
+           'loading', rather than falling through to the final v-else --
+           otherwise a broken onMounted wiring would render identically to
+           a genuinely empty session instead of visibly doing nothing. -->
+      <p
+        v-if="session.status === 'idle' || session.status === 'loading'"
+        class="mt-2 flex items-center gap-2 text-neutral-400"
+      >
+        <UiSpinner size="sm" /> Loading…
+      </p>
+
+      <p v-else-if="session.status === 'error'" class="mt-2 text-red-400">
+        Could not load session state: {{ session.error }}
+      </p>
+
+      <ul v-else-if="session.originsWithForms.length > 0" class="mt-2 space-y-1">
+        <li
+          v-for="entry in session.originsWithForms"
+          :key="entry.origin"
+          class="flex items-center justify-between"
+        >
+          <span>{{ entry.origin }}</span>
+          <span class="text-neutral-400">{{ entry.formCount }} form(s)</span>
+        </li>
+      </ul>
+
+      <p v-else class="mt-2 text-neutral-400">No forms detected yet this session.</p>
     </UiSection>
   </main>
 </template>

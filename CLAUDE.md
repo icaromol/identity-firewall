@@ -74,6 +74,7 @@ Full rationale: `docs/browser-architecture.md`.
 | Extension framework | WXT + Manifest V3 |
 | Language | TypeScript |
 | UI | Vue 3 + Tailwind + Pinia |
+| Iconography | Lucide icons (`@lucide/vue`) everywhere a visual icon is needed -- **never emoji**. Confirmed directly with the user during Phase 6's UI-quality pass: an emoji-based icon pass was tried first and explicitly rejected as unprofessional-looking. |
 | Cryptography | Web Crypto API (never hand-rolled crypto) |
 | Authentication | WebAuthn / Credential Management API |
 | Storage | chrome.storage.local (small state) + IndexedDB (larger structures) |
