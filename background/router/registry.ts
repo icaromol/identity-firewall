@@ -22,6 +22,7 @@ import {
   handleSetPolicy,
 } from '../policy/handler';
 import { handleGetOriginState, handleGetSessionState } from '../session/handler';
+import { handleGetAppSettings, handleSetAppSettings } from '../settings/handler';
 import {
   handleConfirmPendingCredential,
   handleDeleteCredential,
@@ -41,7 +42,14 @@ import {
 } from '../vault/handler';
 import { handleGetPersonalData, handleSetPersonalData } from '../vault/personalData/handler';
 
-export type Capability = 'formDetection' | 'session' | 'vault' | 'identity' | 'firewall' | 'policy';
+export type Capability =
+  | 'formDetection'
+  | 'session'
+  | 'vault'
+  | 'identity'
+  | 'firewall'
+  | 'policy'
+  | 'settings';
 
 export interface HandlerContext {
   sender: Browser.runtime.MessageSender;
@@ -178,5 +186,13 @@ export const registry: Registry = {
   GET_ALL_PRIVACY_LEDGER: {
     capability: 'policy',
     handle: (message) => handleGetAllPrivacyLedger(message),
+  },
+  GET_APP_SETTINGS: {
+    capability: 'settings',
+    handle: (message) => handleGetAppSettings(message),
+  },
+  SET_APP_SETTINGS: {
+    capability: 'settings',
+    handle: (message) => handleSetAppSettings(message),
   },
 };

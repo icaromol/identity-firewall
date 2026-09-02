@@ -289,9 +289,22 @@ A standalone Dashboard page covering exactly what the user asked for: an all-sit
 
 ---
 
-## Phase 7 — Biometric Authorization
+## Phase 7 — Vault Session Security & Biometric Authorization
 
 **Weeks 19–21**
+
+Two related pieces of "when and how the vault stays authorized," folded into one phase rather than triggering a third full roadmap renumbering (the same exercise Phases 5/6/8 already went through once): auto-lock and its Configuration UI first, biometric authorization second. Both are about the vault's authorization lifecycle; neither depends on the other, so they run as two milestone groups within the same phase rather than two separate phases.
+
+### Part A — Auto-lock, Configuration tab, per-field default policies
+
+- Auto-lock the vault after a configurable period of system inactivity (default 30 seconds), via `chrome.idle` — a real gap in the vault's security posture that existed since Phase 2 (only an explicit Lock click ever locked it).
+- A new "Configuration" tab in the Dashboard (`entrypoints/options/`): auto-lock duration, credential save mode (ask/auto-save). Credential auto-*fill* is deliberately shown as a disabled placeholder here, not built — see Part B's own dependency note below.
+- A dropdown per field in the Dashboard's existing "Personal data" tab, exposing the Policy Engine's global per-field defaults (`GET_POLICIES`/`SET_POLICY`/`DELETE_POLICY`, built since Phase 4, never given a UI until now).
+- A new, deliberately separate `background/settings/` module for the account-preference pieces (auto-lock duration, credential modes) — organized so it could be extracted later without entangling it with the vault/identity/policy code, which stays exactly where it is.
+
+**Detailed execution plan:** [`plans/autolock-and-configuration.md`](plans/autolock-and-configuration.md).
+
+### Part B — Biometric Authorization
 
 ### Objectives
 
@@ -311,7 +324,9 @@ Level 3 — Highly sensitive data
 
 ### Deliverable
 
-Biometrics authorize the release of sensitive data without the biometric data itself ever being sent to the site. See `docs/biometric-model.md` for the full design and the Model A vs. Model B distinction (Model A — unlock-only — ships in this phase; Model B is Phase 15).
+Biometrics authorize the release of sensitive data without the biometric data itself ever being sent to the site. See `docs/biometric-model.md` for the full design and the Model A vs. Model B distinction (Model A — unlock-only — ships in this phase; Model B is Phase 15). Credential **auto-fill** (Phase 8's own "Auto-login when the vault is already unlocked" objective) depends on this part shipping first — silently filling a saved credential needs the same authorization guarantee biometrics establishes here, which is why Part A above only ever shows auto-fill as a disabled placeholder, never a working option, until this part is done.
+
+**Detailed execution plan:** to be written as `docs/plans/phase-7-biometric-authorization.md` before this part's implementation starts.
 
 ---
 

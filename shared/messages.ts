@@ -11,6 +11,8 @@
 // POLICY_DECISION, etc. still belong to Phase 3/4 and aren't here yet.
 
 import { z } from 'zod';
+import type { AppSettings } from './settings';
+import { AppSettingsSchema } from './settings';
 import type {
   CredentialRecord,
   PersonalData,
@@ -297,6 +299,24 @@ export const SetPersonalDataMessageSchema = z.object({
 });
 export type SetPersonalDataMessage = z.infer<typeof SetPersonalDataMessageSchema>;
 
+// --- Options page -> Background: App settings (Phase 7 Part A) ---
+// Deliberately separate from Personal Data/Credentials above -- see
+// shared/settings.ts's own header comment on the module boundary this
+// mirrors in background/settings/.
+export const GetAppSettingsMessageSchema = z.object({
+  type: z.literal('GET_APP_SETTINGS'),
+  payload: z.object({}).optional(),
+});
+export type GetAppSettingsMessage = z.infer<typeof GetAppSettingsMessageSchema>;
+
+export const SetAppSettingsMessageSchema = z.object({
+  type: z.literal('SET_APP_SETTINGS'),
+  // Patch-style, matching SET_PERSONAL_DATA's own convention -- a key
+  // omitted from payload leaves the stored value untouched.
+  payload: AppSettingsSchema.partial(),
+});
+export type SetAppSettingsMessage = z.infer<typeof SetAppSettingsMessageSchema>;
+
 // --- Popup -> Background: Credentials ---
 export const GetCredentialMessageSchema = z.object({
   type: z.literal('GET_CREDENTIAL'),
@@ -416,6 +436,8 @@ export const ExtensionMessageSchema = z.discriminatedUnion('type', [
   CreateServiceIdentityMessageSchema,
   GetPersonalDataMessageSchema,
   SetPersonalDataMessageSchema,
+  GetAppSettingsMessageSchema,
+  SetAppSettingsMessageSchema,
   GetCredentialMessageSchema,
   SaveCredentialMessageSchema,
   DeleteCredentialMessageSchema,
@@ -546,6 +568,11 @@ export type CreateServiceIdentityResponse = ServiceIdentityMeta;
 // ServiceIdentityRecordSchema.credentials).
 export type GetPersonalDataResponse = PersonalData;
 export type SetPersonalDataResponse = PersonalData;
+
+// GET_APP_SETTINGS/SET_APP_SETTINGS's response payload shapes
+// (background/settings/handler.ts).
+export type GetAppSettingsResponse = AppSettings;
+export type SetAppSettingsResponse = AppSettings;
 export type GetCredentialResponse = CredentialRecord[];
 export type SaveCredentialResponse = CredentialRecord;
 export type DeleteCredentialResponse = undefined;
