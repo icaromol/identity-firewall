@@ -244,7 +244,7 @@ A gap surfaced while reviewing the codebase against its own design docs: `GET_PE
 
 ### Explicitly out of scope for this phase
 
-- Revoking/deleting a Service Identity (killer feature 7.2) — deferred to **Phase 6**, the Dashboard, where it sits naturally alongside the rest of the per-site management UI.
+- Revoking/deleting a Service Identity (killer feature 7.2) — considered for **Phase 6**, the Dashboard, but ultimately dropped from that phase's narrowed scope too (see Phase 6's own section below); currently unscheduled.
 - Any in-page UI (a hover icon drawn onto the actual page, masked-value previews, auto-login) — deferred to **Phase 8**.
 - Any external email-alias provider integration — that's **Phase 9**.
 
@@ -260,26 +260,32 @@ Passwords    ─┘
 
 ---
 
-## Phase 6 — Extension Dashboard
+## Phase 6 — Extension Dashboard ✅ Complete
 
 **Weeks 17–18**
 
-Three of the four "killer features" `product-vision.md` §7 describes have never made it into this roadmap's actual phase objectives — only 7.1 has any presence here at all (delivered partially, scoped to the active tab, in Phase 4 M5). This phase gives the product its first surface beyond the popup — a full page, opened in a new tab — and uses it to deliver the other three, plus extend the first one to every site the vault knows about, not just whichever tab happens to be active.
+Originally scoped to all four "killer features" `product-vision.md` §7 describes (only 7.1 had any presence in this roadmap's actual phase objectives before this phase). Revisited directly with the user and **narrowed to a concrete 3-tab slice**: 7.1 extended to every site, plus relocating Personal Data and Backup/Recovery out of the popup. **Revoke Identity (7.2), Privacy Score (7.3), and the disclosure-reduction metric (7.4) are dropped from this phase entirely — not deferred to a later milestone of it — and have no scheduled phase as of this writing.** Recorded here plainly rather than silently dropped, per this project's own transparency principle.
 
 ### Objectives
 
-- A new-tab extension page (a new WXT entrypoint, the first UI surface in this project that isn't the popup) listing every origin the vault has a Service Identity for.
-- **"Who knows what about me?" (7.1), extended**: per-site view of exactly what was disclosed and what was denied, for every site at once — not just the active tab.
-- **"Delete my identity" (7.2)**: a Revoke action per site, invalidating that origin's Service Identity in one step — deliberately framed as ending a relationship, not as "change your password."
-- **Privacy Score (7.3)**: an aggregate view across the whole vault (security/privacy/exposure/reused-credentials/trackability), computed from data the Policy Engine and Privacy Ledger already record.
-- **Disclosure-reduction metric (7.4)**: a concrete before/after count of fields disclosed with vs. without the system in place.
-- Relocate the export/backup UI (already built in Phase 2 M7, currently living inside the popup) onto this page's own menu, where there's room for it.
+- A standalone Options page (`entrypoints/options/`, the first WXT entrypoint and UI surface in this project that isn't the popup), reached via the extension's own Options mechanism (`options_ui`, `open_in_tab: true` — a full browser tab, not the embedded `chrome://extensions` dialog), with three hand-rolled Tailwind tabs.
+- **"Who knows what about me?" (7.1), extended**: a new `GET_ALL_PRIVACY_LEDGER` message, listing every origin with a recorded disclosure or denial at once — not just the active tab.
+- **Personal Data**, relocated here from the popup, unchanged in behavior.
+- **Backup & Recovery**, relocated here from the popup (export and restore both), unchanged in behavior.
+
+### Explicitly dropped from this phase (not just deferred)
+
+- Revoking/deleting a Service Identity (killer feature 7.2).
+- Privacy Score (7.3).
+- Disclosure-reduction metric (7.4).
+
+None of these three currently has a scheduled phase. `product-vision.md` §7's own scheduling note has been corrected to match.
 
 ### Deliverable
 
-A single page answering, across every site at once, the question `product-vision.md` opens with: who asked, what did they ask for, what did I hand over, and what did that actually save me.
+A standalone Dashboard page covering exactly what the user asked for: an all-sites privacy view, and Personal Data/Backup & Recovery moved out of the popup.
 
-**Detailed execution plan:** to be written as `docs/plans/phase-6-extension-dashboard.md` before implementation starts, following this project's standing convention.
+**Detailed execution plan:** [`plans/phase-6-extension-dashboard.md`](plans/phase-6-extension-dashboard.md) — milestones M1–M5.
 
 ---
 

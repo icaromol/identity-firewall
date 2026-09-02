@@ -170,7 +170,7 @@ Without needing to reveal the user's real identity.
 
 ## 7. Killer features
 
-> Scheduling note: for a long time only 7.1 had any presence in `docs/roadmap.md`'s actual phase objectives. As of the Phase 5 roadmap restructuring, all four are scheduled: 7.1 is delivered partially (per-active-tab only) in Phase 4, extended to every site in Phase 6 (Extension Dashboard); 7.2, 7.3, and 7.4 are all Phase 6 as well. See `docs/roadmap.md` for current status.
+> Scheduling note: 7.1 is delivered partially (per-active-tab only) in Phase 4, then extended to every site in Phase 6 (Extension Dashboard). Phase 6 was briefly scoped to also cover 7.2, 7.3, and 7.4, but that was narrowed directly with the user during Phase 6's own planning — **7.2 (Revoke Identity), 7.3 (Privacy Score), and 7.4 (the disclosure-reduction metric) were dropped from Phase 6 entirely and currently have no scheduled phase.** See `docs/roadmap.md` for current status.
 
 ### 7.1 — "Who knows what about me?"
 

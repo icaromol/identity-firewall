@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fakeBrowser } from 'wxt/testing/fake-browser';
 import {
   handleDeletePolicy,
+  handleGetAllPrivacyLedger,
   handleGetPolicies,
   handleGetPrivacyLedger,
   handleSetHighTrustOrigin,
@@ -84,6 +85,24 @@ describe('policy handlers', () => {
       type: 'GET_PRIVACY_LEDGER',
       payload: { origin: 'https://nothing-here.example' },
     });
+    expect(result).toEqual([]);
+  });
+
+  it('handleGetAllPrivacyLedger returns entries across every origin, unfiltered', async () => {
+    await recordDisclosure('https://example.com', ['email'], { email: 'real' }, []);
+    await recordDisclosure('https://other.example', ['phone'], {}, ['phone']);
+
+    const result = await handleGetAllPrivacyLedger({ type: 'GET_ALL_PRIVACY_LEDGER' });
+
+    expect(result).toHaveLength(2);
+    expect(result.map((entry) => entry.origin)).toEqual([
+      'https://example.com',
+      'https://other.example',
+    ]);
+  });
+
+  it('handleGetAllPrivacyLedger returns an empty array when nothing has been recorded', async () => {
+    const result = await handleGetAllPrivacyLedger({ type: 'GET_ALL_PRIVACY_LEDGER' });
     expect(result).toEqual([]);
   });
 });

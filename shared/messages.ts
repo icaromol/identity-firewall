@@ -217,6 +217,15 @@ export const GetPrivacyLedgerMessageSchema = z.object({
 });
 export type GetPrivacyLedgerMessage = z.infer<typeof GetPrivacyLedgerMessageSchema>;
 
+// Phase 6 -- the Options page's "Who knows what about me" tab, which has no
+// single active-tab origin to scope by (it's a standalone page listing
+// every site at once). No payload: unlike GET_PRIVACY_LEDGER, this always
+// returns the whole ledger unfiltered.
+export const GetAllPrivacyLedgerMessageSchema = z.object({
+  type: z.literal('GET_ALL_PRIVACY_LEDGER'),
+});
+export type GetAllPrivacyLedgerMessage = z.infer<typeof GetAllPrivacyLedgerMessageSchema>;
+
 // --- Popup -> Background: vault unlock (shared by CREATE_ROOT_IDENTITY
 // and VAULT_UNLOCK -- setting up the vault and unlocking it later both
 // need to prove the same thing, "I hold the unlock factor," per
@@ -398,6 +407,7 @@ export const ExtensionMessageSchema = z.discriminatedUnion('type', [
   DeletePolicyMessageSchema,
   SetHighTrustOriginMessageSchema,
   GetPrivacyLedgerMessageSchema,
+  GetAllPrivacyLedgerMessageSchema,
   VaultStatusMessageSchema,
   CreateRootIdentityMessageSchema,
   VaultUnlockMessageSchema,
@@ -493,6 +503,11 @@ export type SetHighTrustOriginResponse = string[];
 
 // GET_PRIVACY_LEDGER's response payload shape (background/policy/handler.ts).
 export type GetPrivacyLedgerResponse = PrivacyLedgerEntry[];
+
+// GET_ALL_PRIVACY_LEDGER's response payload shape -- every entry across
+// every origin, unfiltered; the store on the receiving end groups these by
+// entry.origin itself (stores/allSitesLedger.store.ts).
+export type GetAllPrivacyLedgerResponse = PrivacyLedgerEntry[];
 
 // VAULT_STATUS's response payload shape (background/vault/handler.ts's
 // handleVaultStatus), named once for the same reason as OriginSummary above.

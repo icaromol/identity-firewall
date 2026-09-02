@@ -5,82 +5,40 @@
 // add the "Pending request" section below, backed by
 // stores/firewall.store.ts -- the Identity Firewall's approval UI. Phase 4
 // M5 adds "What this site knows about you", backed by
-// stores/privacyLedger.store.ts. Phase 5 M1 adds "Personal data", backed
-// by stores/personalData.store.ts -- the first screen that ever lets a
-// real user populate the values "Real" has resolved to since Phase 3.
+// stores/privacyLedger.store.ts. Phase 5 M1 added "Personal data" here,
+// backed by stores/personalData.store.ts -- relocated to the Options page
+// in Phase 6 M3 (docs/plans/phase-6-extension-dashboard.md), along with
+// Export/Restore (Phase 6 M4) -- both are gone from this popup now.
 // Phase 5 M4 adds "Save this login?", backed by
 // stores/pendingCredential.store.ts -- a login captured on submit by the
 // content script, staged in session state until confirmed here. Phase 5
 // M5 adds "Saved logins", backed by stores/savedCredentials.store.ts --
 // lists what's already saved for this site, plain (no masking -- see the
 // plan's own decision), with a Fill action.
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { getFieldKey } from '../../shared/fieldKey';
 import type { ClassifiedField, ClassifiedForm } from '../../shared/messages';
-import type { PersonalData, PersonalDataFieldName, ResponseType } from '../../shared/vault-schema';
+import type { ResponseType } from '../../shared/vault-schema';
 import { useFirewallStore } from '../../stores/firewall.store';
 import { usePendingCredentialStore } from '../../stores/pendingCredential.store';
-import { usePersonalDataStore } from '../../stores/personalData.store';
 import { usePrivacyLedgerStore } from '../../stores/privacyLedger.store';
 import { useSavedCredentialsStore } from '../../stores/savedCredentials.store';
 import { useSessionStore } from '../../stores/session.store';
+import { summarizeLedgerEntries } from '../../stores/shared/ledgerSummary';
 import { useVaultStore } from '../../stores/vault.store';
 
 const session = useSessionStore();
 const vault = useVaultStore();
 const firewall = useFirewallStore();
 const privacyLedger = usePrivacyLedgerStore();
-const personalData = usePersonalDataStore();
 const pendingCredential = usePendingCredentialStore();
 const savedCredentials = useSavedCredentialsStore();
 
-// Aggregates every recorded ledger entry for this origin into the
-// per-service summary privacy-model.md's own mockup shows ("Disclosed: ✓
-// Email, ✓ Username / Denied: ✕ Name..."), not the raw per-event list --
-// a field can appear in both a disclosed and a later denied entry (the
-// user changed their mind between visits); the MOST RECENT entry touching
-// that field wins, matching "what does this site currently have," not a
-// full history of every past decision.
 // biome-ignore lint/correctness/noUnusedVariables: read from <template> -- Biome only lints the <script> block, it can't see template usage.
-const ledgerSummary = computed(() => {
-  const disclosed = new Map<PersonalDataFieldName, ResponseType>();
-  const denied = new Set<PersonalDataFieldName>();
-  let lastAccess: number | null = null;
-
-  for (const entry of privacyLedger.entries) {
-    lastAccess = lastAccess === null ? entry.at : Math.max(lastAccess, entry.at);
-    for (const field of entry.deniedFields) {
-      denied.add(field);
-      disclosed.delete(field);
-    }
-    for (const [field, responseType] of Object.entries(entry.disclosedFields) as [
-      PersonalDataFieldName,
-      ResponseType,
-    ][]) {
-      disclosed.set(field, responseType);
-      denied.delete(field);
-    }
-  }
-
-  return { disclosed, denied, lastAccess };
-});
+const ledgerSummary = computed(() => summarizeLedgerEntries(privacyLedger.entries));
 
 const setupPassphrase = ref('');
 const unlockPassphrase = ref('');
-const exportPassphrase = ref('');
-const restoreFile = ref<File | null>(null);
-const restoreBackupPassphrase = ref('');
-const restoreNewPassphrase = ref('');
-
-// A local reactive copy of PersonalData for the form to bind against --
-// synced from the store once GET_PERSONAL_DATA resolves (below), rather
-// than binding v-model directly to store.data, so an in-progress edit
-// isn't clobbered if the store's data were ever refetched. A one-shot
-// sync after the single fetchPersonalData() call below, not a lifetime
-// watch(status) -- that call only ever runs once (onMounted), so a
-// persistent subscription was more machinery than the actual lifecycle
-// needs (/code-review finding).
-const personalDataForm = reactive<PersonalData>({});
 
 // Every section scoped to the vault's own contents (as opposed to
 // vault.store.ts's own status) needs re-fetching both on mount AND right
@@ -94,9 +52,6 @@ function refreshVaultScopedSections(): void {
   session.fetchSessionState();
   firewall.fetchPendingRequest();
   privacyLedger.fetchLedger();
-  personalData.fetchPersonalData().then(() => {
-    if (personalData.status === 'loaded') Object.assign(personalDataForm, personalData.data);
-  });
   pendingCredential.fetchPendingCredential();
   savedCredentials.fetchCredentials();
 }
@@ -105,15 +60,6 @@ onMounted(() => {
   vault.fetchStatus();
   refreshVaultScopedSections();
 });
-
-// biome-ignore lint/correctness/noUnusedVariables: called from @submit.prevent in <template> -- Biome only lints the <script> block, it can't see template usage.
-function submitPersonalData() {
-  // patch is the full form snapshot, not a minimal diff -- SET_PERSONAL_DATA
-  // itself is patch-style (a key omitted server-side leaves the stored
-  // value untouched), which matters for a FUTURE caller sending a partial
-  // object, not for this one, which always has every field in scope.
-  personalData.savePersonalData({ ...personalDataForm });
-}
 
 // Preserves each field's true index within form.fields (needed for
 // getFieldKey's positional fallback) while still letting the template
@@ -158,37 +104,6 @@ async function submitUnlockPassphrase() {
   await vault.unlockWithPassphrase(unlockPassphrase.value);
   unlockPassphrase.value = '';
   if (!vault.locked) refreshVaultScopedSections();
-}
-
-// biome-ignore lint/correctness/noUnusedVariables: called from @submit.prevent in <template> -- Biome only lints the <script> block, it can't see template usage.
-function submitExportBackup() {
-  vault.exportBackup(exportPassphrase.value);
-  exportPassphrase.value = '';
-}
-
-// biome-ignore lint/correctness/noUnusedVariables: called from @change in <template> -- Biome only lints the <script> block, it can't see template usage.
-function onRestoreFileSelected(event: Event) {
-  const input = event.target as HTMLInputElement;
-  restoreFile.value = input.files?.[0] ?? null;
-}
-
-// biome-ignore lint/correctness/noUnusedVariables: called from @click in <template> -- Biome only lints the <script> block, it can't see template usage.
-function clickRestoreWithPasskey() {
-  if (!restoreFile.value) return;
-  vault.restoreWithPasskey(restoreFile.value, restoreBackupPassphrase.value);
-  restoreBackupPassphrase.value = '';
-}
-
-// biome-ignore lint/correctness/noUnusedVariables: called from @submit.prevent in <template> -- Biome only lints the <script> block, it can't see template usage.
-function submitRestoreWithPassphrase() {
-  if (!restoreFile.value) return;
-  vault.restoreWithPassphrase(
-    restoreFile.value,
-    restoreBackupPassphrase.value,
-    restoreNewPassphrase.value,
-  );
-  restoreBackupPassphrase.value = '';
-  restoreNewPassphrase.value = '';
 }
 </script>
 
@@ -479,90 +394,11 @@ function submitRestoreWithPassphrase() {
     </section>
 
     <section class="mt-4 border-t border-neutral-800 pt-4">
-      <h2 class="text-xs font-semibold uppercase tracking-wide text-neutral-400">Personal data</h2>
-      <p class="mt-1 text-xs text-neutral-500">
-        What "Real" actually sends when you choose it for a field.
-      </p>
-
-      <p
-        v-if="personalData.status === 'idle' || personalData.status === 'loading'"
-        class="mt-2 text-neutral-400"
-      >
-        Loading…
-      </p>
-
-      <!-- Most commonly VAULT_LOCKED -- same "plain error string, no
-           special-casing" convention as the Pending request section
-           above for the identical underlying cause. -->
-      <p v-else-if="personalData.status === 'error'" class="mt-2 text-red-400">
-        {{ personalData.error }}
-      </p>
-
-      <!-- novalidate: PersonalDataSchema never enforces email FORMAT (it's
-           a bare z.string().optional()) -- without this, the browser's own
-           native constraint validation on type="email" would silently
-           block the whole form's submit (Name/Phone/etc included) the
-           moment Email looks malformed, with no saveError ever shown
-           (/code-review finding: submitPersonalData is never even called
-           in that case). -->
-      <form v-else class="mt-2 space-y-2" novalidate @submit.prevent="submitPersonalData">
-        <input
-          v-model="personalDataForm.name"
-          type="text"
-          placeholder="Name"
-          class="w-full rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-neutral-100"
-        />
-        <input
-          v-model="personalDataForm.email"
-          type="email"
-          placeholder="Email"
-          class="w-full rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-neutral-100"
-        />
-        <input
-          v-model="personalDataForm.phone"
-          type="tel"
-          placeholder="Phone"
-          class="w-full rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-neutral-100"
-        />
-        <input
-          v-model="personalDataForm.address"
-          type="text"
-          placeholder="Address"
-          class="w-full rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-neutral-100"
-        />
-        <input
-          v-model="personalDataForm.birthDate"
-          type="date"
-          class="w-full rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-neutral-100"
-        />
-        <div>
-          <input
-            v-model="personalDataForm.nationalId"
-            type="text"
-            placeholder="National ID (e.g. CPF)"
-            class="w-full rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-neutral-100"
-          />
-          <p class="mt-1 text-xs text-neutral-500">
-            Highly sensitive -- always asked for, never filled automatically.
-          </p>
-        </div>
-
-        <button
-          type="submit"
-          class="w-full rounded bg-neutral-100 px-3 py-1.5 font-medium text-neutral-900 disabled:opacity-50"
-          :disabled="personalData.saving"
-        >
-          Save
-        </button>
-        <p v-if="personalData.justSaved" class="text-xs text-green-400">Saved.</p>
-        <p v-else-if="personalData.saveError" class="text-xs text-red-400">
-          {{ personalData.saveError }}
-        </p>
-      </form>
-    </section>
-
-    <section class="mt-4 border-t border-neutral-800 pt-4">
       <h2 class="text-xs font-semibold uppercase tracking-wide text-neutral-400">Vault</h2>
+      <p class="mt-1 text-xs text-neutral-500">
+        Personal data and backup/recovery have moved to the extension's Dashboard page
+        (right-click the extension icon → Options).
+      </p>
 
       <p v-if="vault.status === 'error'" class="mt-2 text-red-400">{{ vault.error }}</p>
 
@@ -606,57 +442,6 @@ function submitRestoreWithPassphrase() {
             Set up with Passphrase
           </button>
         </form>
-
-        <!-- Restore only makes sense pre-initialization -- restoreNewVault
-             (background/vault/setup.ts) rejects with VAULT_ALREADY_INITIALIZED
-             onto an already-set-up vault, matching this placement. -->
-        <div class="space-y-2 border-t border-neutral-800 pt-3">
-          <p class="text-xs font-semibold uppercase tracking-wide text-neutral-400">
-            Restore from backup
-          </p>
-          <input
-            type="file"
-            accept="application/json"
-            class="w-full text-xs text-neutral-300"
-            @change="onRestoreFileSelected"
-          />
-          <input
-            v-model="restoreBackupPassphrase"
-            type="password"
-            placeholder="Backup passphrase"
-            class="w-full rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-neutral-100"
-          />
-          <button
-            type="button"
-            class="w-full rounded bg-neutral-100 px-3 py-1.5 font-medium text-neutral-900 disabled:opacity-50"
-            :disabled="
-              vault.status === 'loading' || !restoreFile || restoreBackupPassphrase.length === 0
-            "
-            @click="clickRestoreWithPasskey"
-          >
-            Restore + new Passkey
-          </button>
-          <form class="space-y-2" @submit.prevent="submitRestoreWithPassphrase">
-            <input
-              v-model="restoreNewPassphrase"
-              type="password"
-              placeholder="Choose a new passphrase"
-              class="w-full rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-neutral-100"
-            />
-            <button
-              type="submit"
-              class="w-full rounded border border-neutral-700 px-3 py-1.5 text-neutral-300 disabled:opacity-50"
-              :disabled="
-                vault.status === 'loading' ||
-                !restoreFile ||
-                restoreBackupPassphrase.length === 0 ||
-                restoreNewPassphrase.length === 0
-              "
-            >
-              Restore + new Passphrase
-            </button>
-          </form>
-        </div>
       </div>
 
       <!-- Initialized but locked: unlock form, keyed off which method this
@@ -710,9 +495,9 @@ function submitRestoreWithPassphrase() {
       </div>
 
       <!-- Unlocked. Per decision 6, nothing about vault CONTENTS is shown
-           here -- just the fact that it's unlocked. Export only prompts for
-           a backup passphrase and triggers a download -- it doesn't display
-           any vault content either, so it's compatible with that rule. -->
+           here -- just the fact that it's unlocked. Export/Restore moved to
+           the Options page (Phase 6 M4) -- see this section's own header
+           note above. -->
       <div v-else class="mt-2 space-y-3">
         <p class="text-green-400">Vault unlocked.</p>
         <button
@@ -723,25 +508,6 @@ function submitRestoreWithPassphrase() {
         >
           Lock
         </button>
-
-        <form class="space-y-2 border-t border-neutral-800 pt-3" @submit.prevent="submitExportBackup">
-          <p class="text-xs font-semibold uppercase tracking-wide text-neutral-400">
-            Export backup
-          </p>
-          <input
-            v-model="exportPassphrase"
-            type="password"
-            placeholder="Choose a backup passphrase"
-            class="w-full rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-neutral-100"
-          />
-          <button
-            type="submit"
-            class="w-full rounded border border-neutral-700 px-3 py-1.5 text-neutral-300 disabled:opacity-50"
-            :disabled="vault.status === 'loading' || exportPassphrase.length === 0"
-          >
-            Download backup
-          </button>
-        </form>
       </div>
     </section>
   </main>

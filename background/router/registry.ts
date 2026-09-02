@@ -15,6 +15,7 @@ import { handleFormDetected, handleFormSubmitted } from '../formDetection/handle
 import { handleCreateServiceIdentity, handleGetServiceIdentity } from '../identity/handler';
 import {
   handleDeletePolicy,
+  handleGetAllPrivacyLedger,
   handleGetPolicies,
   handleGetPrivacyLedger,
   handleSetHighTrustOrigin,
@@ -173,5 +174,9 @@ export const registry: Registry = {
   GET_PRIVACY_LEDGER: {
     capability: 'policy',
     handle: (message) => handleGetPrivacyLedger(message),
+  },
+  GET_ALL_PRIVACY_LEDGER: {
+    capability: 'policy',
+    handle: (message) => handleGetAllPrivacyLedger(message),
   },
 };
