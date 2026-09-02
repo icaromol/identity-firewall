@@ -59,7 +59,7 @@ test('an unlocked vault with no recorded disclosures shows the ledger tab’s em
     .getByPlaceholder('Or choose a passphrase instead')
     .fill('correct horse battery staple');
   await popup.getByRole('button', { name: 'Set up with Passphrase' }).click();
-  await expect(popup.getByText('Vault unlocked.')).toBeVisible();
+  await expect(popup.getByRole('button', { name: 'Lock vault' })).toBeVisible();
 
   const options = await context.newPage();
   await options.goto(`chrome-extension://${extensionId}/options.html`);
@@ -78,7 +78,7 @@ test('the Backup & Recovery tab exports a real backup file once unlocked', async
     .getByPlaceholder('Or choose a passphrase instead')
     .fill('correct horse battery staple');
   await popup.getByRole('button', { name: 'Set up with Passphrase' }).click();
-  await expect(popup.getByText('Vault unlocked.')).toBeVisible();
+  await expect(popup.getByRole('button', { name: 'Lock vault' })).toBeVisible();
 
   const options = await context.newPage();
   await options.goto(`chrome-extension://${extensionId}/options.html`);

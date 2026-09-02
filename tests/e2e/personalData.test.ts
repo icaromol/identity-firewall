@@ -24,7 +24,7 @@ test('entering personal data through the Options page survives a reload (real en
   // Setup via the real UI -- same pattern as vaultLifecycle.test.ts.
   await popup.getByPlaceholder('Or choose a passphrase instead').fill(passphrase);
   await popup.getByRole('button', { name: 'Set up with Passphrase' }).click();
-  await expect(popup.getByText('Vault unlocked.')).toBeVisible();
+  await expect(popup.getByRole('button', { name: 'Lock vault' })).toBeVisible();
 
   const options = await context.newPage();
   await options.goto(`chrome-extension://${extensionId}/options.html`);
@@ -56,7 +56,7 @@ test('a malformed email does not block saving the other fields (/code-review reg
 
   await popup.getByPlaceholder('Or choose a passphrase instead').fill(passphrase);
   await popup.getByRole('button', { name: 'Set up with Passphrase' }).click();
-  await expect(popup.getByText('Vault unlocked.')).toBeVisible();
+  await expect(popup.getByRole('button', { name: 'Lock vault' })).toBeVisible();
 
   const options = await context.newPage();
   await options.goto(`chrome-extension://${extensionId}/options.html`);

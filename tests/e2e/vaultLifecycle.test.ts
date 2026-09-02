@@ -39,7 +39,7 @@ test('a Service Identity survives a real service-worker restart', async ({
   // stores/vault.store.ts's actual setupWithPassphrase code path.
   await popup.getByPlaceholder('Or choose a passphrase instead').fill(passphrase);
   await popup.getByRole('button', { name: 'Set up with Passphrase' }).click();
-  await expect(popup.getByText('Vault unlocked.')).toBeVisible();
+  await expect(popup.getByRole('button', { name: 'Lock vault' })).toBeVisible();
 
   // CREATE_SERVICE_IDENTITY has no UI yet (Phase 3's job) -- direct message
   // is the only way to reach it.
@@ -53,7 +53,7 @@ test('a Service Identity survives a real service-worker restart', async ({
   );
   expect(created.ok).toBe(true);
 
-  await popup.getByRole('button', { name: 'Lock' }).click();
+  await popup.getByRole('button', { name: 'Lock vault' }).click();
   await expect(popup.getByText('Vault is locked.')).toBeVisible();
 
   // Force a REAL restart -- not simulated (see fixtures/extension.ts).
@@ -83,7 +83,7 @@ test('a Service Identity survives a real service-worker restart', async ({
   await popup.reload();
   await popup.getByPlaceholder('Passphrase').fill(passphrase);
   await popup.getByRole('button', { name: 'Unlock with Passphrase' }).click();
-  await expect(popup.getByText('Vault unlocked.')).toBeVisible();
+  await expect(popup.getByRole('button', { name: 'Lock vault' })).toBeVisible();
 
   // The Service Identity created before the restart must be exactly the
   // same after it -- the concrete proof that everything the vault needs

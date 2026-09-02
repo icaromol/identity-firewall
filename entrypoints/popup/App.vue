@@ -91,18 +91,22 @@ const ledgerSummary = computed(() => summarizeLedgerEntries(privacyLedger.entrie
 // biome-ignore lint/correctness/noUnusedVariables: read from <template> -- Biome only lints the <script> block, it can't see template usage.
 const currentOrigin = computed(() => firewall.origin);
 
-// A persistent, at-a-glance vault-state icon in the header -- independent
-// of the Vault section's own detailed cards below, which a user shouldn't
-// have to scroll to just to know "am I locked right now?" No overlapping
-// label text: the Vault section below already owns the literal strings
-// "Vault unlocked."/"Vault is locked." (which tests/e2e/vaultLifecycle.test.ts
-// and others assert on), and Playwright's non-exact getByText matches
-// substrings -- a second element repeating that same text would trip a
-// strict-mode "resolved to 2 elements" violation (the exact class of bug
-// Phase 6's v-show/v-if fix caught).
+// A persistent, at-a-glance, CLICKABLE vault-state icon in the header --
+// once unlocked, it's the ONLY vault control left in the popup (the Vault
+// section below hides itself entirely in that state, per the user's own
+// request). Gated on `status === 'idle'`, not `status !== 'loaded'` -- a
+// /code-review finding caught that the stricter check made this icon
+// (and the Vault section's own outer v-if, below) both go blank for the
+// brief 'loading' window every lock/unlock click passes through, since
+// vault.lock()/unlockWithPasskey() set status='loading' synchronously
+// before their own `locked`/`initialized` fields have actually changed.
+// 'idle' only ever means "fetchStatus hasn't resolved even once yet" --
+// after that, `locked`/`initialized` are always the best information
+// available, including mid-transition, so there's no reason to hide
+// anything just because a request happens to be in flight.
 // biome-ignore lint/correctness/noUnusedVariables: read from <template> -- Biome only lints the <script> block, it can't see template usage.
 const vaultStatusIcon = computed(() => {
-  if (vault.status !== 'loaded') return null;
+  if (vault.status === 'idle') return null;
   if (!vault.initialized) return KeyRound;
   return vault.locked ? Lock : LockOpen;
 });
@@ -236,10 +240,53 @@ async function submitSetupPassphrase() {
   if (!vault.locked) refreshVaultScopedSections();
 }
 
-// biome-ignore lint/correctness/noUnusedVariables: called from @click in <template> -- Biome only lints the <script> block, it can't see template usage.
 async function clickUnlockWithPasskey() {
   await vault.unlockWithPasskey();
   if (!vault.locked) refreshVaultScopedSections();
+}
+
+// What the header's icon button does, if anything, in the vault's current
+// state -- deliberately narrow: only the two transitions that need no
+// further input at all. Locking never needs anything beyond "do it";
+// unlocking only qualifies here when a passkey is actually usable (the
+// exact same condition the Locked section's own "Unlock with Passkey"
+// button already checks below) -- a passphrase-only vault has no way to
+// collect that passphrase from a bare icon click, so it stays null and
+// the full Locked section (still rendered) is the only way in for that
+// case. null also covers "not initialized" -- setup needs its own form
+// UI no click alone can replace.
+type VaultIconAction = 'lock' | 'unlockWithPasskey' | null;
+const vaultIconAction = computed<VaultIconAction>(() => {
+  if (vault.status !== 'loaded' || !vault.initialized) return null;
+  if (!vault.locked) return 'lock';
+  const passkeyUsable =
+    vault.configuredUnlockMethod === undefined ||
+    (vault.configuredUnlockMethod === 'passkey' && vault.passkeyCredentialId);
+  return passkeyUsable ? 'unlockWithPasskey' : null;
+});
+
+// biome-ignore lint/correctness/noUnusedVariables: read from <template> -- Biome only lints the <script> block, it can't see template usage.
+const vaultIconLabel = computed(() => {
+  if (vaultIconAction.value === 'lock') return 'Lock vault';
+  if (vaultIconAction.value === 'unlockWithPasskey') return 'Unlock vault with passkey';
+  return !vault.initialized ? 'Vault not set up' : 'Vault is locked';
+});
+
+// biome-ignore lint/correctness/noUnusedVariables: called from @click in <template> -- Biome only lints the <script> block, it can't see template usage.
+async function clickVaultIcon(): Promise<void> {
+  if (vaultIconAction.value === 'lock') {
+    await vault.lock();
+    // Checked, not unconditional -- a /code-review finding: every other
+    // handler in this file guards its success toast on the real outcome
+    // (this branch's own unlockWithPasskey sibling included, two lines
+    // below), and a failed VAULT_LOCK call must never tell the user their
+    // still-unlocked vault (holding personal data and credentials) is
+    // safely locked.
+    if (vault.locked) toast.push('Vault locked.', 'info');
+  } else if (vaultIconAction.value === 'unlockWithPasskey') {
+    await clickUnlockWithPasskey();
+    if (!vault.locked) toast.push('Vault unlocked.', 'success');
+  }
 }
 
 // biome-ignore lint/correctness/noUnusedVariables: called from @submit.prevent in <template> -- Biome only lints the <script> block, it can't see template usage.
@@ -258,21 +305,38 @@ async function submitUnlockPassphrase() {
       <h1 class="flex items-center gap-1.5 text-base font-semibold">
         <Shield class="h-4 w-4" aria-hidden="true" /> Identity Firewall
       </h1>
-      <span
+      <button
         v-if="vaultStatusIcon"
-        :title="
-          !vault.initialized
-            ? 'Vault not set up'
-            : vault.locked
-              ? 'Vault is locked'
-              : 'Vault is unlocked'
-        "
+        type="button"
+        class="rounded p-1 text-neutral-400 enabled:hover:text-neutral-100 disabled:cursor-default"
+        :disabled="vaultIconAction === null || vault.status === 'loading'"
+        :aria-label="vaultIconLabel"
+        :title="vaultIconLabel"
+        @click="clickVaultIcon()"
       >
-        <component :is="vaultStatusIcon" class="h-4 w-4 text-neutral-400" aria-hidden="true" />
-      </span>
+        <component :is="vaultStatusIcon" class="h-4 w-4" aria-hidden="true" />
+      </button>
     </div>
 
-    <UiSection title="Vault" :icon="Key" :divider="false">
+    <!-- Hidden once fully unlocked, per the user's own request -- once the
+         header icon above is clickable (click it to Lock), there's
+         nothing left in this section worth a whole card just to hold one
+         redundant "Vault unlocked." line and a Lock button.
+
+         Gated on status === 'idle', not status !== 'loaded' -- see
+         vaultStatusIcon's own comment above for why: `locked`/
+         `initialized` stay accurate through a 'loading' window too (only
+         'idle' means "genuinely unknown yet"), and gating on the
+         stricter check made this section flash back into view as an
+         empty shell (matching none of its own branches below, since
+         `locked` hasn't flipped yet) for the brief instant every lock
+         click passes through (a /code-review finding). -->
+    <UiSection
+      v-if="vault.status === 'idle' || !vault.initialized || vault.locked"
+      title="Vault"
+      :icon="Key"
+      :divider="false"
+    >
       <p class="mt-1 text-xs text-neutral-500">
         Personal data and backup/recovery have moved to the extension's Dashboard page
         (right-click the extension icon → Options).
@@ -363,21 +427,6 @@ async function submitUnlockPassphrase() {
         </form>
       </div>
 
-      <!-- Unlocked. Per decision 6, nothing about vault CONTENTS is shown
-           here -- just the fact that it's unlocked. Export/Restore moved to
-           the Options page (Phase 6 M4) -- see this section's own header
-           note above. -->
-      <div v-else class="mt-2 space-y-3">
-        <p class="text-green-400">Vault unlocked.</p>
-        <UiButton
-          :block="false"
-          variant="secondary"
-          :loading="vault.status === 'loading'"
-          @click="vault.lock()"
-        >
-          Lock
-        </UiButton>
-      </div>
     </UiSection>
 
     <!-- The site every section below is scoped to, shown once here rather
