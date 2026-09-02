@@ -36,11 +36,13 @@ import {
   Globe,
   Key,
   KeyRound,
+  Landmark,
   Lock,
   LockOpen,
   Save,
   ScrollText,
   Shield,
+  ShieldBan,
   TriangleAlert,
   X,
 } from '@lucide/vue';
@@ -50,6 +52,8 @@ import UiSection from '../../components/ui/UiSection.vue';
 import UiSpinner from '../../components/ui/UiSpinner.vue';
 import UiTextInput from '../../components/ui/UiTextInput.vue';
 import UiToastHost from '../../components/ui/UiToastHost.vue';
+import UiToggle from '../../components/ui/UiToggle.vue';
+import UiTooltip from '../../components/ui/UiTooltip.vue';
 // biome-ignore-end lint/correctness/noUnusedImports: used in <template>
 import { getFieldKey } from '../../shared/fieldKey';
 import type { ClassifiedField, ClassifiedForm } from '../../shared/messages';
@@ -305,17 +309,18 @@ async function submitUnlockPassphrase() {
       <h1 class="flex items-center gap-1.5 text-base font-semibold">
         <Shield class="h-4 w-4" aria-hidden="true" /> Identity Firewall
       </h1>
-      <button
-        v-if="vaultStatusIcon"
-        type="button"
-        class="rounded p-1 text-neutral-400 enabled:hover:text-neutral-100 disabled:cursor-default"
-        :disabled="vaultIconAction === null || vault.status === 'loading'"
-        :aria-label="vaultIconLabel"
-        :title="vaultIconLabel"
-        @click="clickVaultIcon()"
-      >
-        <component :is="vaultStatusIcon" class="h-4 w-4" aria-hidden="true" />
-      </button>
+      <UiTooltip v-if="vaultStatusIcon" v-slot="{ id }" :text="vaultIconLabel" align="end">
+        <button
+          type="button"
+          class="rounded p-1 text-neutral-400 enabled:hover:text-neutral-100 disabled:cursor-default"
+          :disabled="vaultIconAction === null || vault.status === 'loading'"
+          :aria-label="vaultIconLabel"
+          :aria-describedby="id"
+          @click="clickVaultIcon()"
+        >
+          <component :is="vaultStatusIcon" class="h-4 w-4" aria-hidden="true" />
+        </button>
+      </UiTooltip>
     </div>
 
     <!-- Hidden once fully unlocked, per the user's own request -- once the
@@ -450,19 +455,31 @@ async function submitUnlockPassphrase() {
     >
       <!-- Government/financial safe mode (Phase 4 M6) -- a standing
            per-site setting, shown whenever the origin is known regardless
-           of whether a request happens to be pending right now. -->
-      <label
-        v-if="firewall.origin"
-        class="mt-2 flex items-center gap-2 text-xs text-neutral-400"
-      >
-        <input
-          type="checkbox"
-          :checked="firewall.isHighTrustOrigin"
-          :disabled="firewall.togglingHighTrust"
-          @change="toggleHighTrust()"
-        />
-        Treat this site as government/financial (always ask, ignore policies)
-      </label>
+           of whether a request happens to be pending right now. Compact:
+           an icon, one word, and a switch -- the full explanation moved
+           into the tooltip instead of sitting in the row permanently. -->
+      <div v-if="firewall.origin" class="mt-2">
+        <!-- "Safe mode" is inside UiToggle's own <label> (its default
+             slot), not a separate sibling -- a /code-review finding
+             caught an earlier version with the visible text OUTSIDE the
+             label, shrinking the clickable area down to just the small
+             switch itself. Wrapping this label in the tooltip means the
+             whole row (a real, focusable <input>) is the tooltip's
+             trigger too, reachable via keyboard, not just a decorative
+             span a keyboard user could never focus. -->
+        <UiTooltip v-slot="{ id }" text="Always ask, ignore saved policies for this site.">
+          <UiToggle
+            :model-value="firewall.isHighTrustOrigin"
+            :disabled="firewall.togglingHighTrust"
+            :aria-describedby="id"
+            @update:model-value="toggleHighTrust()"
+          >
+            <span class="flex items-center gap-1.5 text-xs text-neutral-400">
+              <Landmark class="h-3.5 w-3.5" aria-hidden="true" /> Safe mode
+            </span>
+          </UiToggle>
+        </UiTooltip>
+      </div>
 
       <p v-if="firewall.highTrustError" class="mt-1 text-xs text-red-400">
         {{ firewall.highTrustError }}
@@ -508,9 +525,17 @@ async function submitUnlockPassphrase() {
            The user still sees and can change it before Submit. -->
       <div v-else class="mt-2 space-y-4">
         <div class="flex gap-2">
-          <UiButton variant="secondary" size="sm" :block="false" @click="clickDenyOptional()">
-            Deny optional fields
-          </UiButton>
+          <UiTooltip v-slot="{ id }" text="Sets every optional field on this form to Deny in one click.">
+            <UiButton
+              variant="secondary"
+              size="sm"
+              :block="false"
+              :aria-describedby="id"
+              @click="clickDenyOptional()"
+            >
+              <ShieldBan class="h-3.5 w-3.5" aria-hidden="true" /> Deny optional
+            </UiButton>
+          </UiTooltip>
         </div>
 
         <div
