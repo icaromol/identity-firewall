@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Acme — Log in</title>
+    <style>
+      body { font-family: system-ui, sans-serif; max-width: 420px; margin: 40px auto; color: #222; }
+      label { display: block; margin-top: 12px; font-size: 14px; }
+      input { display: block; width: 100%; padding: 6px 8px; margin-top: 4px; box-sizing: border-box; }
+      button { margin-top: 18px; padding: 8px 16px; }
+      .hint { background: #eef; padding: 10px; border-radius: 6px; font-size: 13px; }
+      #result { color: green; font-weight: bold; }
+    </style>
+  </head>
+  <body>
+    <h1>Log in to Acme</h1>
+    <p class="hint">
+      Identity Firewall test page -- login form. <code>autocomplete="current-password"</code>
+      should classify this as a <strong>login</strong>, not a signup. Use this to test: capturing
+      an existing login on submit, and later the "Saved logins" section's Fill action once a
+      credential has been saved here.
+    </p>
+    <form id="login-form">
+      <label>Email or username <input type="email" name="email" autocomplete="username" required /></label>
+      <label>Password <input type="password" name="password" autocomplete="current-password" required /></label>
+      <button type="submit">Log in</button>
+    </form>
+    <p id="result"></p>
+    <script>
+      document.getElementById('login-form').addEventListener('submit', (event) => {
+        event.preventDefault();
+        document.getElementById('result').textContent =
+          '(mock) Logged in. Check the extension popup for the "Save this login?" prompt.';
+      });
+    </script>
+  </body>
+</html>

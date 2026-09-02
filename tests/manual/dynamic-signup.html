@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>DesignTool — Sign up (SPA)</title>
+    <style>
+      body { font-family: system-ui, sans-serif; max-width: 420px; margin: 40px auto; color: #222; }
+      label { display: block; margin-top: 12px; font-size: 14px; }
+      input { display: block; width: 100%; padding: 6px 8px; margin-top: 4px; box-sizing: border-box; }
+      button { margin-top: 18px; padding: 8px 16px; }
+      .hint { background: #fee; padding: 10px; border-radius: 6px; font-size: 13px; }
+    </style>
+  </head>
+  <body>
+    <h1>DesignTool</h1>
+    <p class="hint">
+      <strong>Known limitation, not a bug</strong> (documented in CLAUDE.md / docs/roadmap.md,
+      slated for Phase 9): this page injects its signup form via JS 1.5s after load, simulating a
+      real SPA (e.g. Figma's own signup flow). The content script's detection pass runs once, at
+      <code>document_idle</code>, before this form exists -- so it is never detected at all. Open
+      the extension popup after the form below appears: it should still say
+      "No forms detected yet this session."
+    </p>
+    <div id="app">Loading…</div>
+    <script>
+      setTimeout(() => {
+        document.getElementById('app').innerHTML = `
+          <form id="spa-form">
+            <label>Email <input type="email" name="email" placeholder="Email" required /></label>
+            <label>Password <input type="password" name="password" autocomplete="new-password" placeholder="Password" required /></label>
+            <button type="submit">Sign up</button>
+          </form>`;
+        document.getElementById('spa-form').addEventListener('submit', (event) => {
+          event.preventDefault();
+        });
+      }, 1500);
+    </script>
+  </body>
+</html>

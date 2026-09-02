@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Banco Exemplo — Abrir conta</title>
+    <style>
+      body { font-family: system-ui, sans-serif; max-width: 420px; margin: 40px auto; color: #222; }
+      label { display: block; margin-top: 12px; font-size: 14px; }
+      input { display: block; width: 100%; padding: 6px 8px; margin-top: 4px; box-sizing: border-box; }
+      button { margin-top: 18px; padding: 8px 16px; }
+      .hint { background: #ffe; padding: 10px; border-radius: 6px; font-size: 13px; }
+      #result { color: green; font-weight: bold; }
+    </style>
+  </head>
+  <body>
+    <h1>Banco Exemplo — Abrir conta</h1>
+    <p class="hint">
+      Identity Firewall test page -- a "bank"-shaped site. Includes CPF (nationalId, always
+      classified highly sensitive -- should always ask, never auto-apply, regardless of any saved
+      policy). Use this to test the "Treat this site as government/financial" checkbox in the
+      popup's Pending request section: with it checked, every field should be forced back to
+      "ask," ignoring any policy rule you've set elsewhere.
+    </p>
+    <form id="bank-form">
+      <label>Email <input type="email" name="email" autocomplete="email" required /></label>
+      <label>Phone (optional) <input type="tel" name="phone" autocomplete="tel" /></label>
+      <label>CPF <input type="text" name="cpf" required /></label>
+      <button type="submit">Continue</button>
+    </form>
+    <p id="result"></p>
+    <script>
+      document.getElementById('bank-form').addEventListener('submit', (event) => {
+        event.preventDefault();
+        document.getElementById('result').textContent = '(mock) Submitted.';
+      });
+    </script>
+  </body>
+</html>

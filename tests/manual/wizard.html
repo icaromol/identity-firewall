@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>SignupGenius-style — Multi-step wizard</title>
+    <style>
+      body { font-family: system-ui, sans-serif; max-width: 420px; margin: 40px auto; color: #222; }
+      label { display: block; margin-top: 12px; font-size: 14px; }
+      input { display: block; width: 100%; padding: 6px 8px; margin-top: 4px; box-sizing: border-box; }
+      button { margin-top: 18px; padding: 8px 16px; }
+      .hint { background: #fee; padding: 10px; border-radius: 6px; font-size: 13px; }
+    </style>
+  </head>
+  <body>
+    <h1>Sign up — Step 1 of 2</h1>
+    <p class="hint">
+      <strong>Known limitation, not a bug</strong> (documented in CLAUDE.md / docs/roadmap.md,
+      slated for Phase 9): both steps live in ONE &lt;form&gt; in the DOM from page load -- step 2
+      is merely hidden with <code>display:none</code> until you click Next. The content script's
+      one-shot structural scan sees every field, including step 2's, so autofill can silently
+      write a value into a field you haven't seen yet. Try: approve/autofill on this form while
+      still on step 1, then click Next and check whether the Phone/Password fields already have
+      values.
+    </p>
+    <form id="wizard-form">
+      <div id="step-1">
+        <label>Email <input type="email" name="email" autocomplete="email" required /></label>
+        <button type="button" id="next-button">Next</button>
+      </div>
+      <div id="step-2" style="display: none">
+        <h2>Step 2 of 2</h2>
+        <label>Phone <input type="tel" name="phone" autocomplete="tel" /></label>
+        <label>Password <input type="password" name="password" autocomplete="new-password" required /></label>
+        <button type="submit">Finish</button>
+      </div>
+    </form>
+    <script>
+      document.getElementById('next-button').addEventListener('click', () => {
+        document.getElementById('step-1').style.display = 'none';
+        document.getElementById('step-2').style.display = 'block';
+      });
+      document.getElementById('wizard-form').addEventListener('submit', (event) => {
+        event.preventDefault();
+      });
+    </script>
+  </body>
+</html>

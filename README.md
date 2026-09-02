@@ -49,6 +49,10 @@ pnpm exec playwright install chromium   # one-time setup
 pnpm test:e2e                           # builds the extension, then runs tests/e2e/
 ```
 
+For clicking through the extension by hand against real-shaped forms (signup, login,
+required/optional field mixes, Safe Mode, and the two documented dynamic-rendering
+limitations), see [`tests/manual/README.md`](tests/manual/README.md).
+
 Recommended IDE setup: [VS Code](https://code.visualstudio.com/) + [Volar](https://marketplace.visualstudio.com/items?itemName=Vue.volar).
 
 ## License

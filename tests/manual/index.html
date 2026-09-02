@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Identity Firewall — Manual test pages</title>
+    <style>
+      body { font-family: system-ui, sans-serif; max-width: 560px; margin: 40px auto; color: #222; }
+      li { margin-bottom: 14px; }
+      code { background: #f0f0f0; padding: 1px 4px; border-radius: 3px; }
+    </style>
+  </head>
+  <body>
+    <h1>Identity Firewall — manual test pages</h1>
+    <p>
+      Each link below is a separate origin (its own port), so the extension treats each one as a
+      distinct site with its own Service Identity -- exactly like real different websites would.
+    </p>
+    <ul>
+      <li>
+        <a href="http://127.0.0.1:5301/">Signup form</a> -- all 6 PersonalData fields, required +
+        optional mix, <code>autocomplete="new-password"</code>.
+      </li>
+      <li>
+        <a href="http://127.0.0.1:5302/">Login form</a> -- identifier +
+        <code>autocomplete="current-password"</code>.
+      </li>
+      <li>
+        <a href="http://127.0.0.1:5303/">Personal-data disclosure</a> -- no password field, tests
+        the approval matrix and "Deny optional fields."
+      </li>
+      <li>
+        <a href="http://127.0.0.1:5304/">"Bank" site</a> -- nationalId + the Safe Mode
+        (government/financial) toggle.
+      </li>
+      <li>
+        <a href="http://127.0.0.1:5305/">Dynamic SPA form</a> -- <strong>known limitation</strong>:
+        never detected.
+      </li>
+      <li>
+        <a href="http://127.0.0.1:5306/">Multi-step wizard</a> -- <strong>known limitation</strong>:
+        hidden step can be silently filled.
+      </li>
+    </ul>
+  </body>
+</html>

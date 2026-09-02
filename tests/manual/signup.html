@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Acme — Create your account</title>
+    <style>
+      body { font-family: system-ui, sans-serif; max-width: 420px; margin: 40px auto; color: #222; }
+      label { display: block; margin-top: 12px; font-size: 14px; }
+      input { display: block; width: 100%; padding: 6px 8px; margin-top: 4px; box-sizing: border-box; }
+      button { margin-top: 18px; padding: 8px 16px; }
+      .hint { background: #eef; padding: 10px; border-radius: 6px; font-size: 13px; }
+      #result { color: green; font-weight: bold; }
+    </style>
+  </head>
+  <body>
+    <h1>Create your Acme account</h1>
+    <p class="hint">
+      Identity Firewall test page -- signup form. Covers all six PersonalData field types (name,
+      email, phone, address, birth date, national ID), a required/optional mix, and a
+      <code>autocomplete="new-password"</code> field pair that should classify this as a
+      <strong>signup</strong> form. Submitting should trigger both the Identity Firewall's field
+      approval flow and the "Save this login?" credential-capture prompt in the popup.
+    </p>
+    <form id="signup-form">
+      <label>Full name <input type="text" name="fullname" autocomplete="name" required /></label>
+      <label>Email <input type="email" name="email" autocomplete="email" required /></label>
+      <label>Phone (optional) <input type="tel" name="phone" autocomplete="tel" /></label>
+      <label
+        >Address (optional)
+        <input type="text" name="address" autocomplete="street-address" /></label
+      >
+      <label>Birth date (optional) <input type="date" name="birthdate" autocomplete="bday" /></label>
+      <label>CPF / National ID <input type="text" name="cpf" required /></label>
+      <label>Password <input type="password" name="password" autocomplete="new-password" required /></label>
+      <label>Confirm password <input type="password" name="password_confirmation" required /></label>
+      <button type="submit">Create account</button>
+    </form>
+    <p id="result"></p>
+    <script>
+      document.getElementById('signup-form').addEventListener('submit', (event) => {
+        event.preventDefault();
+        document.getElementById('result').textContent =
+          '(mock) Account created. Check the extension popup for the approval prompt and the "Save this login?" prompt.';
+      });
+    </script>
+  </body>
+</html>
