@@ -74,6 +74,23 @@ const toast = useToastStore();
 // biome-ignore lint/correctness/noUnusedVariables: read from <template> -- Biome only lints the <script> block, it can't see template usage.
 const ledgerSummary = computed(() => summarizeLedgerEntries(privacyLedger.entries));
 
+// The active tab's origin, shown ONCE above the site-scoped sections below
+// instead of repeated in every one of their own titles (a real complaint:
+// the same domain was appearing 3-4 times on screen at once). Reads only
+// firewall.origin, not an OR-chain across all four site-scoped stores --
+// each independently calls the identical resolveActiveTab()
+// (stores/shared/activeTab.ts) and sets its own `origin` the moment tab
+// resolution succeeds, before its own backend call even runs, so
+// firewall.origin is populated in every case any of the others would be
+// too. A /code-review finding caught the OR-chain version of this: since
+// none of the four stores ever reset `origin` back to null on a LATER
+// failed refetch, falling back across stores could keep showing a stale
+// domain from whichever one last succeeded, right above a section
+// correctly reporting "could not determine the active tab" -- reading a
+// single store sidesteps that entirely.
+// biome-ignore lint/correctness/noUnusedVariables: read from <template> -- Biome only lints the <script> block, it can't see template usage.
+const currentOrigin = computed(() => firewall.origin);
+
 // A persistent, at-a-glance vault-state icon in the header -- independent
 // of the Vault section's own detailed cards below, which a user shouldn't
 // have to scroll to just to know "am I locked right now?" No overlapping
@@ -363,6 +380,12 @@ async function submitUnlockPassphrase() {
       </div>
     </UiSection>
 
+    <!-- The site every section below is scoped to, shown once here rather
+         than repeated in each of their own titles. -->
+    <p v-if="currentOrigin" class="mt-4 truncate text-xs text-neutral-500">
+      {{ currentOrigin }}
+    </p>
+
     <!-- The header icon already gives an at-a-glance lock state; the four
          sections below are about a SPECIFIC SITE, so none of them are
          meaningful until the vault actually holds something to disclose.
@@ -372,7 +395,7 @@ async function submitUnlockPassphrase() {
          tests/e2e/firewallApproval.test.ts exercises) still renders in the
          normal red-error style below, unchanged. -->
     <UiSection
-      :title="`Pending request${firewall.origin ? ` — ${firewall.origin}` : ''}`"
+      title="Pending request"
       :icon="Bell"
       :class="firewall.forms.length > 0 ? 'border-l-2 border-amber-500/60 pl-2 -ml-2' : ''"
     >
@@ -491,7 +514,7 @@ async function submitUnlockPassphrase() {
 
     <UiSection
       v-if="pendingCredential.pending"
-      :title="`Save this login${pendingCredential.origin ? ` — ${pendingCredential.origin}` : ''}?`"
+      title="Save this login?"
       :icon="Save"
       class="border-l-2 border-amber-500/60 pl-2 -ml-2"
     >
@@ -531,7 +554,7 @@ async function submitUnlockPassphrase() {
     </UiSection>
 
     <UiSection
-      :title="`Saved logins${savedCredentials.origin ? ` — ${savedCredentials.origin}` : ''}`"
+      title="Saved logins"
       :icon="KeyRound"
     >
       <p
@@ -593,7 +616,7 @@ async function submitUnlockPassphrase() {
     </UiSection>
 
     <UiSection
-      :title="`What this site knows about you${privacyLedger.origin ? ` — ${privacyLedger.origin}` : ''}`"
+      title="What this site knows about you"
       :icon="ScrollText"
     >
       <p
