@@ -1,6 +1,8 @@
 @import "tailwindcss";
+@import "../../assets/theme.css";
 
 body {
   min-width: 320px;
   min-height: 240px;
+  font-family: var(--font-body);
 }

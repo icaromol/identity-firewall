@@ -141,23 +141,23 @@ async function submitRestoreWithPassphrase(): Promise<void> {
 </script>
 
 <template>
-  <main class="min-h-screen bg-neutral-900 p-8 text-sm text-neutral-100">
+  <main class="min-h-screen bg-if-white p-8 text-sm text-if-navy">
     <UiToastHost />
 
-    <h1 class="flex items-center gap-2 text-lg font-semibold">
+    <h1 class="flex items-center gap-2 font-heading text-lg font-bold text-if-navy">
       <Shield class="h-5 w-5" aria-hidden="true" /> Identity Firewall — Dashboard
     </h1>
 
-    <nav class="mt-6 flex gap-1 border-b border-neutral-800">
+    <nav class="mt-6 flex gap-1 border-b border-if-hairline">
       <button
         v-for="tab in TABS"
         :key="tab.value"
         type="button"
-        class="flex items-center gap-1.5 border-b-2 px-4 py-2 text-xs font-semibold uppercase tracking-wide"
+        class="flex items-center gap-1.5 border-b-2 px-4 py-2 font-heading text-xs font-bold uppercase tracking-wide"
         :class="
           activeTab === tab.value
-            ? 'border-neutral-100 text-neutral-100'
-            : 'border-transparent text-neutral-500 hover:text-neutral-300'
+            ? 'border-if-blue text-if-navy'
+            : 'border-transparent text-if-faint hover:text-if-subtle'
         "
         @click="activeTab = tab.value"
       >
@@ -177,15 +177,15 @@ async function submitRestoreWithPassphrase(): Promise<void> {
          this component's own setup(), not inside the panel itself, so
          switching tabs away and back never loses any state. -->
     <section v-if="activeTab === 'ledger'" class="mt-6 max-w-2xl">
-      <p v-if="allSitesLedger.status === 'idle' || allSitesLedger.status === 'loading'" class="flex items-center gap-2 text-neutral-400">
+      <p v-if="allSitesLedger.status === 'idle' || allSitesLedger.status === 'loading'" class="flex items-center gap-2 text-if-muted">
         <UiSpinner size="sm" /> Loading…
       </p>
 
-      <p v-else-if="allSitesLedger.status === 'error'" class="text-red-400">
+      <p v-else-if="allSitesLedger.status === 'error'" class="text-red-600">
         {{ allSitesLedger.error }}
       </p>
 
-      <p v-else-if="siteSummaries.length === 0" class="text-neutral-400">
+      <p v-else-if="siteSummaries.length === 0" class="text-if-muted">
         No sites have any recorded disclosures or denials yet.
       </p>
 
@@ -193,23 +193,23 @@ async function submitRestoreWithPassphrase(): Promise<void> {
         <div
           v-for="site in siteSummaries"
           :key="site.origin"
-          class="rounded border border-neutral-800 p-3"
+          class="rounded border border-if-hairline p-3"
         >
-          <h2 class="font-semibold">{{ site.origin }}</h2>
+          <h2 class="font-heading font-bold text-if-navy">{{ site.origin }}</h2>
           <div class="mt-2 space-y-1">
             <p
               v-for="[field, responseType] in site.disclosed"
               :key="`d-${field}`"
               class="flex items-center gap-1.5"
             >
-              <Check class="h-3.5 w-3.5 text-green-400" aria-hidden="true" /> {{ field }}
-              <span class="text-neutral-500">({{ responseType }})</span>
+              <Check class="h-3.5 w-3.5 text-green-600" aria-hidden="true" /> {{ field }}
+              <span class="text-if-faint">({{ responseType }})</span>
             </p>
             <p v-for="field in site.denied" :key="`x-${field}`" class="flex items-center gap-1.5">
-              <X class="h-3.5 w-3.5 text-red-400" aria-hidden="true" /> {{ field }}
+              <X class="h-3.5 w-3.5 text-red-600" aria-hidden="true" /> {{ field }}
             </p>
           </div>
-          <p class="mt-2 text-xs text-neutral-500">
+          <p class="mt-2 text-xs text-if-faint">
             Last access: {{ new Date(site.lastAccess ?? 0).toLocaleString() }}
           </p>
         </div>
@@ -217,16 +217,16 @@ async function submitRestoreWithPassphrase(): Promise<void> {
     </section>
 
     <section v-if="activeTab === 'personalData'" class="mt-6 max-w-md">
-      <p class="text-xs text-neutral-500">What "Real" actually sends when you choose it for a field.</p>
+      <p class="text-xs text-if-faint">What "Real" actually sends when you choose it for a field.</p>
 
       <p
         v-if="personalData.status === 'idle' || personalData.status === 'loading'"
-        class="mt-2 flex items-center gap-2 text-neutral-400"
+        class="mt-2 flex items-center gap-2 text-if-muted"
       >
         <UiSpinner size="sm" /> Loading…
       </p>
 
-      <p v-else-if="personalData.status === 'error'" class="mt-2 text-red-400">
+      <p v-else-if="personalData.status === 'error'" class="mt-2 text-red-600">
         {{ personalData.error }}
       </p>
 
@@ -238,20 +238,20 @@ async function submitRestoreWithPassphrase(): Promise<void> {
         <UiTextInput v-model="personalDataForm.birthDate" type="date" />
         <div>
           <UiTextInput v-model="personalDataForm.nationalId" placeholder="National ID (e.g. CPF)" />
-          <p class="mt-1 text-xs text-neutral-500">
+          <p class="mt-1 text-xs text-if-faint">
             Highly sensitive -- always asked for, never filled automatically.
           </p>
         </div>
 
         <UiButton type="submit" :loading="personalData.saving">Save</UiButton>
-        <p v-if="personalData.saveError" class="text-xs text-red-400">
+        <p v-if="personalData.saveError" class="text-xs text-red-600">
           {{ personalData.saveError }}
         </p>
       </form>
     </section>
 
     <section v-if="activeTab === 'backup'" class="mt-6 max-w-md">
-      <p v-if="vault.status === 'error'" class="text-red-400">{{ vault.error }}</p>
+      <p v-if="vault.status === 'error'" class="text-red-600">{{ vault.error }}</p>
 
       <!-- 'idle' gets its own standalone branch, not chained with the
            v-else-if below -- combining it with 'loading' in one v-if would
@@ -259,7 +259,7 @@ async function submitRestoreWithPassphrase(): Promise<void> {
            too, breaking the `vault.status === 'loading'` disabled-checks
            inside them (a real vue-tsc error caught this). Matches
            entrypoints/popup/App.vue's own Vault section structure. -->
-      <p v-if="vault.status === 'idle'" class="mt-2 flex items-center gap-2 text-neutral-400">
+      <p v-if="vault.status === 'idle'" class="mt-2 flex items-center gap-2 text-if-muted">
         <UiSpinner size="sm" /> Loading…
       </p>
 
@@ -267,18 +267,18 @@ async function submitRestoreWithPassphrase(): Promise<void> {
            right here -- restoreNewVault (background/vault/setup.ts) rejects
            with VAULT_ALREADY_INITIALIZED onto an already-set-up vault. -->
       <div v-else-if="!vault.initialized" class="space-y-3">
-        <p class="text-neutral-400">
+        <p class="text-if-muted">
           No vault yet. Open the extension icon to set one up, or restore one from a backup below.
         </p>
 
-        <div class="space-y-2 rounded border border-neutral-800 p-3">
-          <p class="text-xs font-semibold uppercase tracking-wide text-neutral-400">
+        <div class="space-y-2 rounded border border-if-hairline p-3">
+          <p class="font-heading text-xs font-bold uppercase tracking-wide text-if-muted">
             Restore from backup
           </p>
           <input
             type="file"
             accept="application/json"
-            class="w-full text-xs text-neutral-300"
+            class="w-full text-xs text-if-subtle"
             @change="onRestoreFileSelected"
           />
           <UiTextInput
@@ -315,13 +315,13 @@ async function submitRestoreWithPassphrase(): Promise<void> {
         </div>
       </div>
 
-      <p v-else-if="vault.locked" class="text-neutral-400">
+      <p v-else-if="vault.locked" class="text-if-muted">
         Vault is locked. Open the extension icon and unlock it first.
       </p>
 
       <div v-else class="space-y-3">
-        <form class="space-y-2 rounded border border-neutral-800 p-3" @submit.prevent="submitExportBackup">
-          <p class="text-xs font-semibold uppercase tracking-wide text-neutral-400">
+        <form class="space-y-2 rounded border border-if-hairline p-3" @submit.prevent="submitExportBackup">
+          <p class="font-heading text-xs font-bold uppercase tracking-wide text-if-muted">
             Export backup
           </p>
           <UiTextInput

@@ -40,7 +40,7 @@ const tooltipId = useId();
     <span
       :id="tooltipId"
       role="tooltip"
-      class="pointer-events-none absolute top-full z-50 mt-1.5 w-max max-w-56 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-200 opacity-0 shadow-lg transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100"
+      class="pointer-events-none absolute top-full z-50 mt-1.5 w-max max-w-56 rounded border border-if-navy bg-if-navy px-2 py-1 text-xs text-if-white/90 opacity-0 shadow-lg transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100"
       :class="align === 'end' ? 'right-0' : 'left-1/2 -translate-x-1/2'"
     >
       {{ text }}

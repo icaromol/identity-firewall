@@ -36,8 +36,8 @@ withDefaults(
     class="flex items-center justify-center gap-2 rounded font-medium disabled:opacity-50"
     :class="[
       variant === 'primary'
-        ? 'bg-neutral-100 text-neutral-900'
-        : 'border border-neutral-700 text-neutral-300',
+        ? 'bg-if-blue text-if-white'
+        : 'border border-if-line text-if-navy',
       block ? 'w-full' : '',
       size === 'sm' ? 'px-2 py-1 text-xs' : 'px-3 py-1.5',
     ]"

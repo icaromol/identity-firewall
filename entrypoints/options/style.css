@@ -1,1 +1,6 @@
 @import "tailwindcss";
+@import "../../assets/theme.css";
+
+body {
+  font-family: var(--font-body);
+}

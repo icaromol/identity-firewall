@@ -302,17 +302,17 @@ async function submitUnlockPassphrase() {
 </script>
 
 <template>
-  <main class="p-4 text-sm text-neutral-100 bg-neutral-900">
+  <main class="p-4 text-sm text-if-navy bg-if-white">
     <UiToastHost />
 
     <div class="flex items-center justify-between">
-      <h1 class="flex items-center gap-1.5 text-base font-semibold">
+      <h1 class="flex items-center gap-1.5 font-heading text-base font-bold text-if-navy">
         <Shield class="h-4 w-4" aria-hidden="true" /> Identity Firewall
       </h1>
       <UiTooltip v-if="vaultStatusIcon" v-slot="{ id }" :text="vaultIconLabel" align="end">
         <button
           type="button"
-          class="rounded p-1 text-neutral-400 enabled:hover:text-neutral-100 disabled:cursor-default"
+          class="rounded p-1 text-if-muted enabled:hover:text-if-navy disabled:cursor-default"
           :disabled="vaultIconAction === null || vault.status === 'loading'"
           :aria-label="vaultIconLabel"
           :aria-describedby="id"
@@ -342,18 +342,18 @@ async function submitUnlockPassphrase() {
       :icon="Key"
       :divider="false"
     >
-      <p class="mt-1 text-xs text-neutral-500">
+      <p class="mt-1 text-xs text-if-faint">
         Personal data and backup/recovery have moved to the extension's Dashboard page
         (right-click the extension icon → Options).
       </p>
 
-      <p v-if="vault.status === 'error'" class="mt-2 text-red-400">{{ vault.error }}</p>
+      <p v-if="vault.status === 'error'" class="mt-2 text-red-600">{{ vault.error }}</p>
 
       <!-- 'idle' (fetchStatus hasn't resolved yet) gets its own branch --
            otherwise vault.store.ts's default state (initialized:false)
            would flash "set up your vault" on every popup open, even for an
            already-set-up vault, until the async VAULT_STATUS reply lands. -->
-      <p v-if="vault.status === 'idle'" class="mt-2 flex items-center gap-2 text-neutral-400">
+      <p v-if="vault.status === 'idle'" class="mt-2 flex items-center gap-2 text-if-muted">
         <UiSpinner size="sm" /> Loading…
       </p>
 
@@ -361,12 +361,12 @@ async function submitUnlockPassphrase() {
            uninitialized vault also reports locked:true, so checking `locked`
            first would show "please unlock" instead of "please set up". -->
       <div v-else-if="!vault.initialized" class="mt-2 space-y-3">
-        <p class="text-neutral-400">Set up your vault to get started.</p>
+        <p class="text-if-muted">Set up your vault to get started.</p>
 
         <UiButton :loading="vault.status === 'loading'" @click="clickSetupWithPasskey()">
           Set up with Passkey (recommended)
         </UiButton>
-        <p class="text-xs text-neutral-500">
+        <p class="text-xs text-if-faint">
           Uses your device's biometric or security key. Recommended over a passphrase -- see
           ADR-012.
         </p>
@@ -398,7 +398,7 @@ async function submitUnlockPassphrase() {
            passkey button ISN'T fully usable, so the user is never left
            with zero visible way to unlock. -->
       <div v-else-if="vault.locked" class="mt-2 space-y-3">
-        <p class="text-neutral-400">Vault is locked.</p>
+        <p class="text-if-muted">Vault is locked.</p>
 
         <UiButton
           v-if="
@@ -436,7 +436,7 @@ async function submitUnlockPassphrase() {
 
     <!-- The site every section below is scoped to, shown once here rather
          than repeated in each of their own titles. -->
-    <p v-if="currentOrigin" class="mt-4 truncate text-xs text-neutral-500">
+    <p v-if="currentOrigin" class="mt-4 truncate text-xs text-if-faint">
       {{ currentOrigin }}
     </p>
 
@@ -474,18 +474,18 @@ async function submitUnlockPassphrase() {
             :aria-describedby="id"
             @update:model-value="toggleHighTrust()"
           >
-            <span class="flex items-center gap-1.5 text-xs text-neutral-400">
+            <span class="flex items-center gap-1.5 text-xs text-if-muted">
               <Landmark class="h-3.5 w-3.5" aria-hidden="true" /> Safe mode
             </span>
           </UiToggle>
         </UiTooltip>
       </div>
 
-      <p v-if="firewall.highTrustError" class="mt-1 text-xs text-red-400">
+      <p v-if="firewall.highTrustError" class="mt-1 text-xs text-red-600">
         {{ firewall.highTrustError }}
       </p>
 
-      <p v-if="firewall.isHighTrustOrigin" class="mt-2 flex items-start gap-1.5 text-amber-400">
+      <p v-if="firewall.isHighTrustOrigin" class="mt-2 flex items-start gap-1.5 text-amber-600">
         <TriangleAlert class="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
         This site has been identified as a government/financial service. Automatic identity
         autofill has been disabled.
@@ -493,26 +493,26 @@ async function submitUnlockPassphrase() {
 
       <p
         v-if="firewall.status === 'idle' || firewall.status === 'loading'"
-        class="mt-2 flex items-center gap-2 text-neutral-400"
+        class="mt-2 flex items-center gap-2 text-if-muted"
       >
         <UiSpinner size="sm" /> Loading…
       </p>
 
       <p
         v-else-if="firewall.status === 'error' && firewall.error === 'VAULT_LOCKED'"
-        class="mt-2 text-neutral-500"
+        class="mt-2 text-if-faint"
       >
         Set up your vault above to see this.
       </p>
 
-      <p v-else-if="firewall.status === 'error'" class="mt-2 text-red-400">
+      <p v-else-if="firewall.status === 'error'" class="mt-2 text-red-600">
         Could not load pending request: {{ firewall.error }}
       </p>
 
       <!-- Requires PersonalData, which requires an unlocked vault --
            handleGetPendingRequest throws VaultLockedError otherwise,
            surfaced here as a plain error string rather than a crash. -->
-      <p v-else-if="firewall.forms.length === 0" class="mt-2 text-neutral-400">
+      <p v-else-if="firewall.forms.length === 0" class="mt-2 text-if-muted">
         Nothing pending for this tab.
       </p>
 
@@ -541,7 +541,7 @@ async function submitUnlockPassphrase() {
         <div
           v-for="form in firewall.forms"
           :key="form.formIndex"
-          class="space-y-2 rounded border border-neutral-800 p-2"
+          class="space-y-2 rounded border border-if-hairline p-2"
         >
           <ul class="space-y-1">
             <li
@@ -551,13 +551,13 @@ async function submitUnlockPassphrase() {
             >
               <div>
                 <span>{{ entry.field.fieldType }}</span>
-                <span class="ml-1 text-xs text-neutral-500">{{ entry.field.sensitivity }}</span>
-                <span v-if="!entry.field.apparentlyRequired" class="ml-1 text-xs text-neutral-500"
+                <span class="ml-1 text-xs text-if-faint">{{ entry.field.sensitivity }}</span>
+                <span v-if="!entry.field.apparentlyRequired" class="ml-1 text-xs text-if-faint"
                   >(optional)</span
                 >
               </div>
               <select
-                class="rounded border border-neutral-700 bg-neutral-800 px-1 py-0.5 text-xs text-neutral-100"
+                class="rounded border border-if-line bg-if-biscuit px-1 py-0.5 text-xs text-if-navy"
                 :value="firewall.getDecision(form.formIndex, entry.key) ?? ''"
                 @change="onDecisionChange(form.formIndex, entry.key, $event)"
               >
@@ -579,7 +579,7 @@ async function submitUnlockPassphrase() {
           >
             Submit
           </UiButton>
-          <p v-if="firewall.submitErrors[form.formIndex]" class="text-xs text-red-400">
+          <p v-if="firewall.submitErrors[form.formIndex]" class="text-xs text-red-600">
             {{ firewall.submitErrors[form.formIndex] }}
           </p>
         </div>
@@ -593,14 +593,13 @@ async function submitUnlockPassphrase() {
       class="border-l-2 border-amber-500/60 pl-2 -ml-2"
     >
       <div class="mt-2 space-y-2">
-        <p class="text-neutral-300">
+        <p class="text-if-subtle">
           {{ pendingCredential.pending.identifier ?? '(no username/email detected)' }}
         </p>
-        <input
-          :value="pendingCredential.pending.password"
+        <UiTextInput
+          :model-value="pendingCredential.pending.password"
           type="password"
           readonly
-          class="w-full rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-neutral-100"
         />
         <div class="flex gap-2">
           <UiButton
@@ -621,7 +620,7 @@ async function submitUnlockPassphrase() {
             Discard
           </UiButton>
         </div>
-        <p v-if="pendingCredential.actionError" class="text-xs text-red-400">
+        <p v-if="pendingCredential.actionError" class="text-xs text-red-600">
           {{ pendingCredential.actionError }}
         </p>
       </div>
@@ -633,23 +632,23 @@ async function submitUnlockPassphrase() {
     >
       <p
         v-if="savedCredentials.status === 'idle' || savedCredentials.status === 'loading'"
-        class="mt-2 flex items-center gap-2 text-neutral-400"
+        class="mt-2 flex items-center gap-2 text-if-muted"
       >
         <UiSpinner size="sm" /> Loading…
       </p>
 
       <p
         v-else-if="savedCredentials.status === 'error' && savedCredentials.error === 'VAULT_LOCKED'"
-        class="mt-2 text-neutral-500"
+        class="mt-2 text-if-faint"
       >
         Set up your vault above to see this.
       </p>
 
-      <p v-else-if="savedCredentials.status === 'error'" class="mt-2 text-red-400">
+      <p v-else-if="savedCredentials.status === 'error'" class="mt-2 text-red-600">
         {{ savedCredentials.error }}
       </p>
 
-      <p v-else-if="savedCredentials.credentials.length === 0" class="mt-2 text-neutral-400">
+      <p v-else-if="savedCredentials.credentials.length === 0" class="mt-2 text-if-muted">
         Nothing saved for this site yet.
       </p>
 
@@ -658,20 +657,15 @@ async function submitUnlockPassphrase() {
           <li
             v-for="credential in savedCredentials.credentials"
             :key="credential.kind"
-            class="space-y-1 rounded border border-neutral-800 p-2"
+            class="space-y-1 rounded border border-if-hairline p-2"
           >
             <template v-if="credential.kind === 'password'">
-              <p class="text-neutral-300">{{ credential.username ?? '(no username)' }}</p>
+              <p class="text-if-subtle">{{ credential.username ?? '(no username)' }}</p>
               <!-- type="text", not "password" -- decision 3 (the plan)
                    requires this list to show what's saved plainly, no
                    masking; that's Phase 8's job, once there's a proper
                    in-page reveal-preview to build instead. -->
-              <input
-                :value="credential.password"
-                type="text"
-                readonly
-                class="w-full rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-neutral-100"
-              />
+              <UiTextInput :model-value="credential.password" type="text" readonly />
               <UiButton
                 variant="secondary"
                 :loading="savedCredentials.filling === credential"
@@ -680,10 +674,10 @@ async function submitUnlockPassphrase() {
                 Fill
               </UiButton>
             </template>
-            <p v-else class="text-neutral-400">Passkey (not fillable this way)</p>
+            <p v-else class="text-if-muted">Passkey (not fillable this way)</p>
           </li>
         </ul>
-        <p v-if="savedCredentials.fillError" class="text-xs text-red-400">
+        <p v-if="savedCredentials.fillError" class="text-xs text-red-600">
           {{ savedCredentials.fillError }}
         </p>
       </div>
@@ -695,38 +689,38 @@ async function submitUnlockPassphrase() {
     >
       <p
         v-if="privacyLedger.status === 'idle' || privacyLedger.status === 'loading'"
-        class="mt-2 flex items-center gap-2 text-neutral-400"
+        class="mt-2 flex items-center gap-2 text-if-muted"
       >
         <UiSpinner size="sm" /> Loading…
       </p>
 
       <p
         v-else-if="privacyLedger.status === 'error' && privacyLedger.error === 'VAULT_LOCKED'"
-        class="mt-2 text-neutral-500"
+        class="mt-2 text-if-faint"
       >
         Set up your vault above to see this.
       </p>
 
-      <p v-else-if="privacyLedger.status === 'error'" class="mt-2 text-red-400">
+      <p v-else-if="privacyLedger.status === 'error'" class="mt-2 text-red-600">
         {{ privacyLedger.error }}
       </p>
 
       <p
         v-else-if="ledgerSummary.disclosed.size === 0 && ledgerSummary.denied.size === 0"
-        class="mt-2 text-neutral-400"
+        class="mt-2 text-if-muted"
       >
         No history for this site yet.
       </p>
 
       <div v-else class="mt-2 space-y-1">
         <p v-for="[field, responseType] in ledgerSummary.disclosed" :key="`d-${field}`" class="flex items-center gap-1.5">
-          <Check class="h-3.5 w-3.5 text-green-400" aria-hidden="true" /> {{ field }}
-          <span class="text-neutral-500">({{ responseType }})</span>
+          <Check class="h-3.5 w-3.5 text-green-600" aria-hidden="true" /> {{ field }}
+          <span class="text-if-faint">({{ responseType }})</span>
         </p>
         <p v-for="field in ledgerSummary.denied" :key="`x-${field}`" class="flex items-center gap-1.5">
-          <X class="h-3.5 w-3.5 text-red-400" aria-hidden="true" /> {{ field }}
+          <X class="h-3.5 w-3.5 text-red-600" aria-hidden="true" /> {{ field }}
         </p>
-        <p v-if="ledgerSummary.lastAccess" class="mt-2 text-xs text-neutral-500">
+        <p v-if="ledgerSummary.lastAccess" class="mt-2 text-xs text-if-faint">
           Last access: {{ new Date(ledgerSummary.lastAccess).toLocaleString() }}
         </p>
       </div>
@@ -743,12 +737,12 @@ async function submitUnlockPassphrase() {
            a genuinely empty session instead of visibly doing nothing. -->
       <p
         v-if="session.status === 'idle' || session.status === 'loading'"
-        class="mt-2 flex items-center gap-2 text-neutral-400"
+        class="mt-2 flex items-center gap-2 text-if-muted"
       >
         <UiSpinner size="sm" /> Loading…
       </p>
 
-      <p v-else-if="session.status === 'error'" class="mt-2 text-red-400">
+      <p v-else-if="session.status === 'error'" class="mt-2 text-red-600">
         Could not load session state: {{ session.error }}
       </p>
 
@@ -759,11 +753,11 @@ async function submitUnlockPassphrase() {
           class="flex items-center justify-between"
         >
           <span>{{ entry.origin }}</span>
-          <span class="text-neutral-400">{{ entry.formCount }} form(s)</span>
+          <span class="text-if-muted">{{ entry.formCount }} form(s)</span>
         </li>
       </ul>
 
-      <p v-else class="mt-2 text-neutral-400">No forms detected yet this session.</p>
+      <p v-else class="mt-2 text-if-muted">No forms detected yet this session.</p>
     </UiSection>
   </main>
 </template>

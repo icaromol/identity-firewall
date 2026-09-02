@@ -11,7 +11,7 @@ const toast = useToastStore();
 const VARIANT_CLASSES: Record<string, string> = {
   success: 'border-green-500/40 text-green-300',
   error: 'border-red-500/40 text-red-300',
-  info: 'border-neutral-700 text-neutral-200',
+  info: 'border-if-white/20 text-if-white/90',
 };
 </script>
 
@@ -29,7 +29,7 @@ const VARIANT_CLASSES: Record<string, string> = {
         v-for="item in toast.toasts"
         :key="item.id"
         role="status"
-        class="pointer-events-auto w-full max-w-sm cursor-pointer rounded-lg border bg-neutral-900/95 px-3 py-2 text-xs shadow-lg backdrop-blur"
+        class="pointer-events-auto w-full max-w-sm cursor-pointer rounded-lg border bg-if-navy/95 px-3 py-2 text-xs shadow-lg backdrop-blur"
         :class="VARIANT_CLASSES[item.variant]"
         @click="toast.dismiss(item.id)"
       >

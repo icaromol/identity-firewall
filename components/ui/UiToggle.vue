@@ -112,10 +112,10 @@ watch(
         @blur="onBlur"
       />
       <span
-        class="h-4 w-7 rounded-full bg-neutral-700 transition-colors peer-checked:bg-neutral-100 peer-disabled:opacity-50"
+        class="h-4 w-7 rounded-full bg-if-navy/35 transition-colors peer-checked:bg-if-lagoon peer-disabled:opacity-50"
       />
       <span
-        class="absolute left-0.5 h-3 w-3 rounded-full bg-neutral-900 transition-transform peer-checked:translate-x-3.5"
+        class="absolute left-0.5 h-3 w-3 rounded-full bg-if-white shadow-sm transition-transform peer-checked:translate-x-3.5"
       />
     </span>
   </label>

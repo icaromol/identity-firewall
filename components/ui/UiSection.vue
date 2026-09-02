@@ -16,9 +16,9 @@ withDefaults(defineProps<{ title: string; icon?: Component; divider?: boolean }>
 </script>
 
 <template>
-  <section :class="divider ? 'mt-4 border-t border-neutral-800 pt-4' : 'mt-4'">
+  <section :class="divider ? 'mt-4 border-t border-if-hairline pt-4' : 'mt-4'">
     <h2
-      class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-neutral-400"
+      class="flex items-center gap-1.5 font-heading text-xs font-bold uppercase tracking-wide text-if-muted"
     >
       <component :is="icon" v-if="icon" class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
       <slot name="title">{{ title }}</slot>

@@ -1,0 +1,46 @@
+@font-face {
+  font-family: "Manrope";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("./fonts/manrope-700.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Plus Jakarta Sans";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./fonts/plus-jakarta-sans-400.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Plus Jakarta Sans";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("./fonts/plus-jakarta-sans-500.woff2") format("woff2");
+}
+
+@theme {
+  --color-if-white: #ffffff;
+  --color-if-navy: #141f4d;
+  --color-if-blue: #2e5dc9;
+  --color-if-biscuit: #fbf1e4;
+  --color-if-sunbeam: #efc96b;
+  --color-if-tangerine: #ff8259;
+  --color-if-dahlia: #ae3fa0;
+  --color-if-lagoon: #4ec3c6;
+
+  /* Named opacity steps of if-navy -- a single place to retune "muted
+     text" or "hairline border" everywhere it's used, instead of hunting
+     down every if-navy/NN call site by hand. */
+  --color-if-hairline: color-mix(in srgb, var(--color-if-navy) 12%, transparent);
+  --color-if-line: color-mix(in srgb, var(--color-if-navy) 25%, transparent);
+  --color-if-faint: color-mix(in srgb, var(--color-if-navy) 45%, transparent);
+  --color-if-muted: color-mix(in srgb, var(--color-if-navy) 60%, transparent);
+  --color-if-subtle: color-mix(in srgb, var(--color-if-navy) 70%, transparent);
+
+  --font-heading: "Manrope", system-ui, sans-serif;
+  --font-body: "Plus Jakarta Sans", system-ui, sans-serif;
+}
