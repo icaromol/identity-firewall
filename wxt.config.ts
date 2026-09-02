@@ -22,10 +22,14 @@ import { defineConfig } from 'wxt';
 // detect -> approve -> autofill loop needs manual verification in a real
 // browser (docs/plans/phase-3-identity-firewall.md's M6) rather than an
 // e2e test asserting on it end-to-end.
+//
+// 'idle' added for Phase 7 Part A -- background/settings/idleLock.ts's
+// auto-lock mechanism (docs/plans/autolock-and-configuration.md).
+// Doesn't trigger a Chrome permission warning at all.
 export default defineConfig({
   modules: ['@wxt-dev/module-vue'],
   manifest: {
-    permissions: ['storage', 'activeTab'],
+    permissions: ['storage', 'activeTab', 'idle'],
   },
   vite: () => ({
     plugins: [tailwindcss()],

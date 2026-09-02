@@ -12,14 +12,18 @@ import { z } from 'zod';
 export const CredentialSaveModeSchema = z.enum(['ask', 'auto']);
 export type CredentialSaveMode = z.infer<typeof CredentialSaveModeSchema>;
 
+// chrome.idle.setDetectionInterval's own documented floor (confirmed
+// against MDN/Chrome's own API docs, not assumed). Lives here, not in
+// background/settings/idleLock.ts, so the one number has exactly one
+// definition -- idleLock.ts imports this rather than redefining it.
+export const MIN_AUTO_LOCK_SECONDS = 15;
+
 // autoLockSeconds: null means "never auto-lock". A positive integer
-// otherwise -- chrome.idle.setDetectionInterval's own documented floor is
-// 15 seconds (confirmed against MDN/Chrome's own API docs, not assumed),
-// clamped to that floor wherever this value is actually applied
-// (background/settings/idleLock.ts), not enforced here in the schema --
-// the schema stays a plain positive-integer-or-null contract; the floor
-// is a chrome.idle implementation detail, not a rule about what settings
-// data itself is allowed to contain.
+// otherwise, clamped to MIN_AUTO_LOCK_SECONDS wherever this value is
+// actually applied (background/settings/idleLock.ts), not enforced here
+// in the schema -- the schema stays a plain positive-integer-or-null
+// contract; the floor is a chrome.idle implementation detail, not a rule
+// about what settings data itself is allowed to contain.
 export const AppSettingsSchema = z.object({
   autoLockSeconds: z.number().int().positive().nullable(),
   credentialSaveMode: CredentialSaveModeSchema,

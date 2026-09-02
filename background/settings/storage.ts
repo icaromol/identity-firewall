@@ -11,14 +11,18 @@
 // identity/policy code, which is exactly why this file never imports
 // from background/vault/.
 //
-// No write-queue/transaction here, unlike vault/storage.ts's
-// updateVaultIndexWithResult -- settings changes are rare, single-actor,
-// user-driven edits from the Configuration tab, not concurrent
-// background writes; a plain read-modify-write is a proportionate
-// choice for this domain, not an oversight.
+// Read-modify-write is still serialized through the same
+// createSerialQueue() primitive vault/storage.ts's own write paths use
+// (/code-review, verification pass -- the popup and the Options page can
+// both be open at once, and the Configuration tab's own controls can fire
+// two SET_APP_SETTINGS calls back-to-back, so "settings writes are rare
+// and single-actor" doesn't actually hold; without this, the second of
+// two concurrent setAppSettings calls would read the same stale `current`
+// and silently clobber the first patch on write).
 
 import { browser } from 'wxt/browser';
 import { type AppSettings, AppSettingsSchema, DEFAULT_APP_SETTINGS } from '../../shared/settings';
+import { createSerialQueue } from '../vault/serialQueue';
 
 const APP_SETTINGS_STORAGE_KEY = 'if_app_settings_v1';
 
@@ -28,6 +32,8 @@ export async function getAppSettings(): Promise<AppSettings> {
   return parsed.success ? parsed.data : DEFAULT_APP_SETTINGS;
 }
 
+const enqueue = createSerialQueue();
+
 // Patch-style, matching background/vault/personalData/storage.ts's own
 // setPersonalData convention -- an explicit `undefined`-valued key (e.g.
 // from a reactive form object) is stripped before merging, treated the
@@ -35,12 +41,14 @@ export async function getAppSettings(): Promise<AppSettings> {
 // previously-saved value. An explicit `null` (autoLockSeconds: null,
 // meaning "never auto-lock") is a real, meaningful patch value and is
 // NOT stripped -- only `undefined` is.
-export async function setAppSettings(patch: Partial<AppSettings>): Promise<AppSettings> {
-  const current = await getAppSettings();
-  const cleanPatch = Object.fromEntries(
-    Object.entries(patch).filter(([, value]) => value !== undefined),
-  );
-  const next = AppSettingsSchema.parse({ ...current, ...cleanPatch });
-  await browser.storage.local.set({ [APP_SETTINGS_STORAGE_KEY]: next });
-  return next;
+export function setAppSettings(patch: Partial<AppSettings>): Promise<AppSettings> {
+  return enqueue(async () => {
+    const current = await getAppSettings();
+    const cleanPatch = Object.fromEntries(
+      Object.entries(patch).filter(([, value]) => value !== undefined),
+    );
+    const next = AppSettingsSchema.parse({ ...current, ...cleanPatch });
+    await browser.storage.local.set({ [APP_SETTINGS_STORAGE_KEY]: next });
+    return next;
+  });
 }
