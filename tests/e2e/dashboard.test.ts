@@ -102,4 +102,10 @@ test('the Backup & Recovery tab exports a real backup file once unlocked', async
   const bundle = JSON.parse(content);
   expect(bundle).toMatchObject({ formatVersion: 1, kdf: 'argon2id' });
   expect(bundle.ciphertextB64).toBeTruthy();
+
+  // Before the UI-quality pass, a successful export gave literally no
+  // on-screen confirmation beyond the file landing in the Downloads
+  // folder -- components/ui/UiToastHost.vue's toast is the first feedback
+  // this action has ever had.
+  await expect(options.getByRole('status').filter({ hasText: 'Backup downloaded.' })).toBeVisible();
 });

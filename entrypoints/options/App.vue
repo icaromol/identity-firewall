@@ -5,16 +5,31 @@
 // inherits state the popup already fetched; every store below fetches its
 // own data independently, the same "self-contained, independently
 // testable stores" convention the popup's own stores already follow.
+//
+// UI-quality pass: inputs/buttons now go through components/ui/, matching
+// the popup's own refactor. Toasts (stores/shared/toast.store.ts) confirm
+// Save/Export/Restore, all of which gave no feedback (or, for Save, only
+// a small inline line easy to miss) before -- reserved for transient
+// success confirmations; an error a user needs to actually read stays
+// inline near its own control, unchanged.
 import { computed, onMounted, reactive, ref } from 'vue';
+// biome-ignore-start lint/correctness/noUnusedImports: used in <template> -- Biome only lints the <script> block, it can't see template usage.
+import UiButton from '../../components/ui/UiButton.vue';
+import UiSpinner from '../../components/ui/UiSpinner.vue';
+import UiTextInput from '../../components/ui/UiTextInput.vue';
+import UiToastHost from '../../components/ui/UiToastHost.vue';
+// biome-ignore-end lint/correctness/noUnusedImports: used in <template>
 import type { PersonalData, PrivacyLedgerEntry } from '../../shared/vault-schema';
 import { useAllSitesLedgerStore } from '../../stores/allSitesLedger.store';
 import { usePersonalDataStore } from '../../stores/personalData.store';
 import { type LedgerSummary, summarizeLedgerEntries } from '../../stores/shared/ledgerSummary';
+import { useToastStore } from '../../stores/shared/toast.store';
 import { useVaultStore } from '../../stores/vault.store';
 
 const allSitesLedger = useAllSitesLedgerStore();
 const personalData = usePersonalDataStore();
 const vault = useVaultStore();
+const toast = useToastStore();
 
 type Tab = 'ledger' | 'personalData' | 'backup';
 // biome-ignore lint/correctness/noUnusedVariables: read/written from <template> -- Biome only lints the <script> block, it can't see template usage.
@@ -72,44 +87,50 @@ onMounted(() => {
 });
 
 // biome-ignore lint/correctness/noUnusedVariables: called from @submit.prevent in <template> -- Biome only lints the <script> block, it can't see template usage.
-function submitPersonalData() {
-  personalData.savePersonalData({ ...personalDataForm });
+async function submitPersonalData(): Promise<void> {
+  await personalData.savePersonalData({ ...personalDataForm });
+  if (personalData.justSaved) toast.push('Saved.', 'success');
 }
 
 // biome-ignore lint/correctness/noUnusedVariables: called from @submit.prevent in <template> -- Biome only lints the <script> block, it can't see template usage.
-function submitExportBackup() {
-  vault.exportBackup(exportPassphrase.value);
+async function submitExportBackup(): Promise<void> {
+  await vault.exportBackup(exportPassphrase.value);
   exportPassphrase.value = '';
+  if (!vault.error) toast.push('Backup downloaded.', 'success');
 }
 
 // biome-ignore lint/correctness/noUnusedVariables: called from @change in <template> -- Biome only lints the <script> block, it can't see template usage.
-function onRestoreFileSelected(event: Event) {
+function onRestoreFileSelected(event: Event): void {
   const input = event.target as HTMLInputElement;
   restoreFile.value = input.files?.[0] ?? null;
 }
 
 // biome-ignore lint/correctness/noUnusedVariables: called from @click in <template> -- Biome only lints the <script> block, it can't see template usage.
-function clickRestoreWithPasskey() {
+async function clickRestoreWithPasskey(): Promise<void> {
   if (!restoreFile.value) return;
-  vault.restoreWithPasskey(restoreFile.value, restoreBackupPassphrase.value);
+  await vault.restoreWithPasskey(restoreFile.value, restoreBackupPassphrase.value);
   restoreBackupPassphrase.value = '';
+  if (!vault.error) toast.push('Vault restored.', 'success');
 }
 
 // biome-ignore lint/correctness/noUnusedVariables: called from @submit.prevent in <template> -- Biome only lints the <script> block, it can't see template usage.
-function submitRestoreWithPassphrase() {
+async function submitRestoreWithPassphrase(): Promise<void> {
   if (!restoreFile.value) return;
-  vault.restoreWithPassphrase(
+  await vault.restoreWithPassphrase(
     restoreFile.value,
     restoreBackupPassphrase.value,
     restoreNewPassphrase.value,
   );
   restoreBackupPassphrase.value = '';
   restoreNewPassphrase.value = '';
+  if (!vault.error) toast.push('Vault restored.', 'success');
 }
 </script>
 
 <template>
   <main class="min-h-screen bg-neutral-900 p-8 text-sm text-neutral-100">
+    <UiToastHost />
+
     <h1 class="text-lg font-semibold">Identity Firewall — Dashboard</h1>
 
     <nav class="mt-6 flex gap-1 border-b border-neutral-800">
@@ -146,11 +167,8 @@ function submitRestoreWithPassphrase() {
          this component's own setup(), not inside the panel itself, so
          switching tabs away and back never loses any state. -->
     <section v-if="activeTab === 'ledger'" class="mt-6 max-w-2xl">
-      <p
-        v-if="allSitesLedger.status === 'idle' || allSitesLedger.status === 'loading'"
-        class="text-neutral-400"
-      >
-        Loading…
+      <p v-if="allSitesLedger.status === 'idle' || allSitesLedger.status === 'loading'" class="flex items-center gap-2 text-neutral-400">
+        <UiSpinner size="sm" /> Loading…
       </p>
 
       <p v-else-if="allSitesLedger.status === 'error'" class="text-red-400">
@@ -189,9 +207,9 @@ function submitRestoreWithPassphrase() {
 
       <p
         v-if="personalData.status === 'idle' || personalData.status === 'loading'"
-        class="mt-2 text-neutral-400"
+        class="mt-2 flex items-center gap-2 text-neutral-400"
       >
-        Loading…
+        <UiSpinner size="sm" /> Loading…
       </p>
 
       <p v-else-if="personalData.status === 'error'" class="mt-2 text-red-400">
@@ -199,56 +217,20 @@ function submitRestoreWithPassphrase() {
       </p>
 
       <form v-else class="mt-2 space-y-2" novalidate @submit.prevent="submitPersonalData">
-        <input
-          v-model="personalDataForm.name"
-          type="text"
-          placeholder="Name"
-          class="w-full rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-neutral-100"
-        />
-        <input
-          v-model="personalDataForm.email"
-          type="email"
-          placeholder="Email"
-          class="w-full rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-neutral-100"
-        />
-        <input
-          v-model="personalDataForm.phone"
-          type="tel"
-          placeholder="Phone"
-          class="w-full rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-neutral-100"
-        />
-        <input
-          v-model="personalDataForm.address"
-          type="text"
-          placeholder="Address"
-          class="w-full rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-neutral-100"
-        />
-        <input
-          v-model="personalDataForm.birthDate"
-          type="date"
-          class="w-full rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-neutral-100"
-        />
+        <UiTextInput v-model="personalDataForm.name" placeholder="Name" />
+        <UiTextInput v-model="personalDataForm.email" type="email" placeholder="Email" />
+        <UiTextInput v-model="personalDataForm.phone" type="tel" placeholder="Phone" />
+        <UiTextInput v-model="personalDataForm.address" placeholder="Address" />
+        <UiTextInput v-model="personalDataForm.birthDate" type="date" />
         <div>
-          <input
-            v-model="personalDataForm.nationalId"
-            type="text"
-            placeholder="National ID (e.g. CPF)"
-            class="w-full rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-neutral-100"
-          />
+          <UiTextInput v-model="personalDataForm.nationalId" placeholder="National ID (e.g. CPF)" />
           <p class="mt-1 text-xs text-neutral-500">
             Highly sensitive -- always asked for, never filled automatically.
           </p>
         </div>
 
-        <button
-          type="submit"
-          class="w-full rounded bg-neutral-100 px-3 py-1.5 font-medium text-neutral-900 disabled:opacity-50"
-          :disabled="personalData.saving"
-        >
-          Save
-        </button>
-        <p v-if="personalData.justSaved" class="text-xs text-green-400">Saved.</p>
-        <p v-else-if="personalData.saveError" class="text-xs text-red-400">
+        <UiButton type="submit" :loading="personalData.saving">Save</UiButton>
+        <p v-if="personalData.saveError" class="text-xs text-red-400">
           {{ personalData.saveError }}
         </p>
       </form>
@@ -263,7 +245,9 @@ function submitRestoreWithPassphrase() {
            too, breaking the `vault.status === 'loading'` disabled-checks
            inside them (a real vue-tsc error caught this). Matches
            entrypoints/popup/App.vue's own Vault section structure. -->
-      <p v-if="vault.status === 'idle'" class="mt-2 text-neutral-400">Loading…</p>
+      <p v-if="vault.status === 'idle'" class="mt-2 flex items-center gap-2 text-neutral-400">
+        <UiSpinner size="sm" /> Loading…
+      </p>
 
       <!-- No vault yet: point back to the popup for setup, offer restore
            right here -- restoreNewVault (background/vault/setup.ts) rejects
@@ -283,41 +267,36 @@ function submitRestoreWithPassphrase() {
             class="w-full text-xs text-neutral-300"
             @change="onRestoreFileSelected"
           />
-          <input
+          <UiTextInput
             v-model="restoreBackupPassphrase"
             type="password"
             placeholder="Backup passphrase"
-            class="w-full rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-neutral-100"
           />
-          <button
-            type="button"
-            class="w-full rounded bg-neutral-100 px-3 py-1.5 font-medium text-neutral-900 disabled:opacity-50"
-            :disabled="
-              vault.status === 'loading' || !restoreFile || restoreBackupPassphrase.length === 0
-            "
+          <UiButton
+            :disabled="!restoreFile || restoreBackupPassphrase.length === 0"
+            :loading="vault.status === 'loading'"
             @click="clickRestoreWithPasskey"
           >
             Restore + new Passkey
-          </button>
+          </UiButton>
           <form class="space-y-2" @submit.prevent="submitRestoreWithPassphrase">
-            <input
+            <UiTextInput
               v-model="restoreNewPassphrase"
               type="password"
               placeholder="Choose a new passphrase"
-              class="w-full rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-neutral-100"
             />
-            <button
+            <UiButton
               type="submit"
-              class="w-full rounded border border-neutral-700 px-3 py-1.5 text-neutral-300 disabled:opacity-50"
+              variant="secondary"
               :disabled="
-                vault.status === 'loading' ||
                 !restoreFile ||
                 restoreBackupPassphrase.length === 0 ||
                 restoreNewPassphrase.length === 0
               "
+              :loading="vault.status === 'loading'"
             >
               Restore + new Passphrase
-            </button>
+            </UiButton>
           </form>
         </div>
       </div>
@@ -331,19 +310,19 @@ function submitRestoreWithPassphrase() {
           <p class="text-xs font-semibold uppercase tracking-wide text-neutral-400">
             Export backup
           </p>
-          <input
+          <UiTextInput
             v-model="exportPassphrase"
             type="password"
             placeholder="Choose a backup passphrase"
-            class="w-full rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-neutral-100"
           />
-          <button
+          <UiButton
             type="submit"
-            class="w-full rounded border border-neutral-700 px-3 py-1.5 text-neutral-300 disabled:opacity-50"
-            :disabled="vault.status === 'loading' || exportPassphrase.length === 0"
+            variant="secondary"
+            :disabled="exportPassphrase.length === 0"
+            :loading="vault.status === 'loading'"
           >
             Download backup
-          </button>
+          </UiButton>
         </form>
       </div>
     </section>

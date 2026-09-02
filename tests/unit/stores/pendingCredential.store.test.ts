@@ -52,7 +52,7 @@ describe('usePendingCredentialStore', () => {
     expect(store.status).toBe('error');
   });
 
-  it('confirm() saves the credential, clears pending, and stores the saved record', async () => {
+  it('confirm() saves the credential and clears pending', async () => {
     mockActiveTab();
     vi.spyOn(fakeBrowser.runtime, 'sendMessage').mockResolvedValueOnce({
       ok: true,
@@ -74,7 +74,7 @@ describe('usePendingCredentialStore', () => {
     });
     expect(store.confirming).toBe(false);
     expect(store.pending).toBeNull();
-    expect(store.savedCredential).toEqual(saved);
+    expect(store.actionError).toBeNull();
   });
 
   it('confirm() sets actionError on a handler-level failure and leaves pending untouched', async () => {

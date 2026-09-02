@@ -15,16 +15,33 @@
 // M5 adds "Saved logins", backed by stores/savedCredentials.store.ts --
 // lists what's already saved for this site, plain (no masking -- see the
 // plan's own decision), with a Fill action.
+//
+// UI-quality pass: every input/button/section wrapper now goes through
+// components/ui/ -- previously every one of these was a hand-copied class
+// string, repeated (and occasionally drifting) at every call site. Toasts
+// (stores/shared/toast.store.ts) now confirm actions that used to give the
+// user zero feedback at all (Safe Mode toggle, Deny optional fields,
+// Submit, credential Confirm/Discard/Fill) -- reserved for transient,
+// already-succeeded confirmations; an error a user needs to actually read
+// stays inline near its control, unchanged from before.
 import { computed, onMounted, ref } from 'vue';
+// biome-ignore-start lint/correctness/noUnusedImports: used in <template> -- Biome only lints the <script> block, it can't see template usage.
+import UiButton from '../../components/ui/UiButton.vue';
+import UiSection from '../../components/ui/UiSection.vue';
+import UiSpinner from '../../components/ui/UiSpinner.vue';
+import UiTextInput from '../../components/ui/UiTextInput.vue';
+import UiToastHost from '../../components/ui/UiToastHost.vue';
+// biome-ignore-end lint/correctness/noUnusedImports: used in <template>
 import { getFieldKey } from '../../shared/fieldKey';
 import type { ClassifiedField, ClassifiedForm } from '../../shared/messages';
-import type { ResponseType } from '../../shared/vault-schema';
+import type { CredentialRecord, ResponseType } from '../../shared/vault-schema';
 import { useFirewallStore } from '../../stores/firewall.store';
 import { usePendingCredentialStore } from '../../stores/pendingCredential.store';
 import { usePrivacyLedgerStore } from '../../stores/privacyLedger.store';
 import { useSavedCredentialsStore } from '../../stores/savedCredentials.store';
 import { useSessionStore } from '../../stores/session.store';
 import { summarizeLedgerEntries } from '../../stores/shared/ledgerSummary';
+import { useToastStore } from '../../stores/shared/toast.store';
 import { useVaultStore } from '../../stores/vault.store';
 
 const session = useSessionStore();
@@ -33,6 +50,7 @@ const firewall = useFirewallStore();
 const privacyLedger = usePrivacyLedgerStore();
 const pendingCredential = usePendingCredentialStore();
 const savedCredentials = useSavedCredentialsStore();
+const toast = useToastStore();
 
 // biome-ignore lint/correctness/noUnusedVariables: read from <template> -- Biome only lints the <script> block, it can't see template usage.
 const ledgerSummary = computed(() => summarizeLedgerEntries(privacyLedger.entries));
@@ -80,6 +98,79 @@ function onDecisionChange(formIndex: number, fieldKey: string, event: Event): vo
   if (value) firewall.setDecision(formIndex, fieldKey, value as ResponseType);
 }
 
+// biome-ignore lint/correctness/noUnusedVariables: called from @change in <template> -- Biome only lints the <script> block, it can't see template usage.
+async function toggleHighTrust(): Promise<void> {
+  // Mirrors the store's own re-entrancy guard (toggleHighTrust's early
+  // `if (... this.togglingHighTrust) return;`) -- without duplicating it
+  // here, a double-click racing ahead of the checkbox's own :disabled
+  // re-render would let a second, short-circuited call fall through to
+  // the check below and fire a false "Safe mode enabled." toast for a
+  // click that changed nothing (a /code-review finding).
+  if (firewall.togglingHighTrust) return;
+  const wasHighTrust = firewall.isHighTrustOrigin;
+  await firewall.toggleHighTrust();
+  if (!firewall.highTrustError && firewall.isHighTrustOrigin !== wasHighTrust) {
+    toast.push(
+      firewall.isHighTrustOrigin
+        ? 'Safe mode enabled for this site.'
+        : 'Safe mode disabled for this site.',
+      'success',
+    );
+  }
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: called from @click in <template> -- Biome only lints the <script> block, it can't see template usage.
+function clickDenyOptional(): void {
+  // Only toast when something was actually touched -- a form with no
+  // optional fields at all would otherwise get a "Denied all optional
+  // fields." confirmation for a click that changed nothing (a
+  // /code-review finding).
+  const count = firewall.applyDenyOptional();
+  if (count > 0) toast.push('Denied all optional fields.', 'success');
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: called from @click in <template> -- Biome only lints the <script> block, it can't see template usage.
+async function clickSubmitForm(formIndex: number): Promise<void> {
+  // submitForm's own boolean return, not "no error" -- a stale formIndex
+  // (this.forms reassigned by an unrelated refresh in-flight at the same
+  // time) makes submitForm early-return without ever touching
+  // submitErrors, which "no error" would otherwise misread as success
+  // (a /code-review finding).
+  const applied = await firewall.submitForm(formIndex);
+  if (applied) {
+    toast.push('Applied.', 'success');
+  }
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: called from @click in <template> -- Biome only lints the <script> block, it can't see template usage.
+async function clickConfirmCredential(): Promise<void> {
+  // Mirrors confirm()'s own `if (... this.confirming) return;` guard --
+  // see toggleHighTrust's comment above for why this duplication matters.
+  if (pendingCredential.confirming) return;
+  await pendingCredential.confirm();
+  if (!pendingCredential.actionError) {
+    toast.push('Login saved.', 'success');
+  }
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: called from @click in <template> -- Biome only lints the <script> block, it can't see template usage.
+async function clickDiscardCredential(): Promise<void> {
+  if (pendingCredential.discarding) return;
+  await pendingCredential.discard();
+  if (!pendingCredential.actionError) {
+    toast.push('Discarded.', 'info');
+  }
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: called from @click in <template> -- Biome only lints the <script> block, it can't see template usage.
+async function clickFillCredential(credential: CredentialRecord) {
+  if (savedCredentials.filling !== null) return;
+  await savedCredentials.fill(credential);
+  if (!savedCredentials.fillError) {
+    toast.push('Filled.', 'success');
+  }
+}
+
 // biome-ignore lint/correctness/noUnusedVariables: called from @click in <template> -- Biome only lints the <script> block, it can't see template usage.
 async function clickSetupWithPasskey() {
   await vault.setupWithPasskey();
@@ -109,22 +200,20 @@ async function submitUnlockPassphrase() {
 
 <template>
   <main class="p-4 text-sm text-neutral-100 bg-neutral-900">
+    <UiToastHost />
+
     <h1 class="text-base font-semibold">Identity Firewall</h1>
 
-    <section class="mt-4">
-      <h2 class="text-xs font-semibold uppercase tracking-wide text-neutral-400">
-        Sites detected this session
-      </h2>
-
+    <UiSection title="Sites detected this session" :divider="false">
       <!-- 'idle' (fetch hasn't run/completed yet) shares this branch with
            'loading', rather than falling through to the final v-else --
            otherwise a broken onMounted wiring would render identically to
            a genuinely empty session instead of visibly doing nothing. -->
       <p
         v-if="session.status === 'idle' || session.status === 'loading'"
-        class="mt-2 text-neutral-400"
+        class="mt-2 flex items-center gap-2 text-neutral-400"
       >
-        Loading…
+        <UiSpinner size="sm" /> Loading…
       </p>
 
       <p v-else-if="session.status === 'error'" class="mt-2 text-red-400">
@@ -143,13 +232,9 @@ async function submitUnlockPassphrase() {
       </ul>
 
       <p v-else class="mt-2 text-neutral-400">No forms detected yet this session.</p>
-    </section>
+    </UiSection>
 
-    <section class="mt-4 border-t border-neutral-800 pt-4">
-      <h2 class="text-xs font-semibold uppercase tracking-wide text-neutral-400">
-        Pending request{{ firewall.origin ? ` — ${firewall.origin}` : '' }}
-      </h2>
-
+    <UiSection :title="`Pending request${firewall.origin ? ` — ${firewall.origin}` : ''}`">
       <!-- Government/financial safe mode (Phase 4 M6) -- a standing
            per-site setting, shown whenever the origin is known regardless
            of whether a request happens to be pending right now. -->
@@ -161,7 +246,7 @@ async function submitUnlockPassphrase() {
           type="checkbox"
           :checked="firewall.isHighTrustOrigin"
           :disabled="firewall.togglingHighTrust"
-          @change="firewall.toggleHighTrust()"
+          @change="toggleHighTrust()"
         />
         Treat this site as government/financial (always ask, ignore policies)
       </label>
@@ -177,9 +262,9 @@ async function submitUnlockPassphrase() {
 
       <p
         v-if="firewall.status === 'idle' || firewall.status === 'loading'"
-        class="mt-2 text-neutral-400"
+        class="mt-2 flex items-center gap-2 text-neutral-400"
       >
-        Loading…
+        <UiSpinner size="sm" /> Loading…
       </p>
 
       <p v-else-if="firewall.status === 'error'" class="mt-2 text-red-400">
@@ -202,13 +287,9 @@ async function submitUnlockPassphrase() {
            The user still sees and can change it before Submit. -->
       <div v-else class="mt-2 space-y-4">
         <div class="flex gap-2">
-          <button
-            type="button"
-            class="rounded border border-neutral-700 px-2 py-1 text-xs text-neutral-300"
-            @click="firewall.applyDenyOptional()"
-          >
+          <UiButton variant="secondary" size="sm" :block="false" @click="clickDenyOptional()">
             Deny optional fields
-          </button>
+          </UiButton>
         </div>
 
         <div
@@ -246,29 +327,24 @@ async function submitUnlockPassphrase() {
             </li>
           </ul>
 
-          <button
-            type="button"
-            class="w-full rounded bg-neutral-100 px-3 py-1.5 font-medium text-neutral-900 disabled:opacity-50"
-            :disabled="firewall.submittingFormIndex === form.formIndex"
-            @click="firewall.submitForm(form.formIndex)"
+          <UiButton
+            :loading="firewall.submittingFormIndex === form.formIndex"
+            @click="clickSubmitForm(form.formIndex)"
           >
             Submit
-          </button>
+          </UiButton>
           <p v-if="firewall.submitErrors[form.formIndex]" class="text-xs text-red-400">
             {{ firewall.submitErrors[form.formIndex] }}
           </p>
         </div>
       </div>
-    </section>
+    </UiSection>
 
-    <section v-if="pendingCredential.pending || pendingCredential.savedCredential" class="mt-4 border-t border-neutral-800 pt-4">
-      <h2 class="text-xs font-semibold uppercase tracking-wide text-neutral-400">
-        Save this login{{ pendingCredential.origin ? ` — ${pendingCredential.origin}` : '' }}?
-      </h2>
-
-      <p v-if="pendingCredential.savedCredential" class="mt-2 text-green-400">Saved.</p>
-
-      <div v-else-if="pendingCredential.pending" class="mt-2 space-y-2">
+    <UiSection
+      v-if="pendingCredential.pending"
+      :title="`Save this login${pendingCredential.origin ? ` — ${pendingCredential.origin}` : ''}?`"
+    >
+      <div class="mt-2 space-y-2">
         <p class="text-neutral-300">
           {{ pendingCredential.pending.identifier ?? '(no username/email detected)' }}
         </p>
@@ -279,39 +355,38 @@ async function submitUnlockPassphrase() {
           class="w-full rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-neutral-100"
         />
         <div class="flex gap-2">
-          <button
-            type="button"
-            class="flex-1 rounded bg-neutral-100 px-3 py-1.5 font-medium text-neutral-900 disabled:opacity-50"
-            :disabled="pendingCredential.confirming"
-            @click="pendingCredential.confirm()"
+          <UiButton
+            class="flex-1"
+            :block="false"
+            :loading="pendingCredential.confirming"
+            @click="clickConfirmCredential()"
           >
             Save
-          </button>
-          <button
-            type="button"
-            class="flex-1 rounded border border-neutral-700 px-3 py-1.5 text-neutral-300 disabled:opacity-50"
-            :disabled="pendingCredential.discarding"
-            @click="pendingCredential.discard()"
+          </UiButton>
+          <UiButton
+            class="flex-1"
+            :block="false"
+            variant="secondary"
+            :loading="pendingCredential.discarding"
+            @click="clickDiscardCredential()"
           >
             Discard
-          </button>
+          </UiButton>
         </div>
         <p v-if="pendingCredential.actionError" class="text-xs text-red-400">
           {{ pendingCredential.actionError }}
         </p>
       </div>
-    </section>
+    </UiSection>
 
-    <section class="mt-4 border-t border-neutral-800 pt-4">
-      <h2 class="text-xs font-semibold uppercase tracking-wide text-neutral-400">
-        Saved logins{{ savedCredentials.origin ? ` — ${savedCredentials.origin}` : '' }}
-      </h2>
-
+    <UiSection
+      :title="`Saved logins${savedCredentials.origin ? ` — ${savedCredentials.origin}` : ''}`"
+    >
       <p
         v-if="savedCredentials.status === 'idle' || savedCredentials.status === 'loading'"
-        class="mt-2 text-neutral-400"
+        class="mt-2 flex items-center gap-2 text-neutral-400"
       >
-        Loading…
+        <UiSpinner size="sm" /> Loading…
       </p>
 
       <p v-else-if="savedCredentials.status === 'error'" class="mt-2 text-red-400">
@@ -341,14 +416,13 @@ async function submitUnlockPassphrase() {
                 readonly
                 class="w-full rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-neutral-100"
               />
-              <button
-                type="button"
-                class="w-full rounded border border-neutral-700 px-3 py-1.5 text-neutral-300 disabled:opacity-50"
-                :disabled="savedCredentials.filling === credential"
-                @click="savedCredentials.fill(credential)"
+              <UiButton
+                variant="secondary"
+                :loading="savedCredentials.filling === credential"
+                @click="clickFillCredential(credential)"
               >
                 Fill
-              </button>
+              </UiButton>
             </template>
             <p v-else class="text-neutral-400">Passkey (not fillable this way)</p>
           </li>
@@ -357,18 +431,16 @@ async function submitUnlockPassphrase() {
           {{ savedCredentials.fillError }}
         </p>
       </div>
-    </section>
+    </UiSection>
 
-    <section class="mt-4 border-t border-neutral-800 pt-4">
-      <h2 class="text-xs font-semibold uppercase tracking-wide text-neutral-400">
-        What this site knows about you{{ privacyLedger.origin ? ` — ${privacyLedger.origin}` : '' }}
-      </h2>
-
+    <UiSection
+      :title="`What this site knows about you${privacyLedger.origin ? ` — ${privacyLedger.origin}` : ''}`"
+    >
       <p
         v-if="privacyLedger.status === 'idle' || privacyLedger.status === 'loading'"
-        class="mt-2 text-neutral-400"
+        class="mt-2 flex items-center gap-2 text-neutral-400"
       >
-        Loading…
+        <UiSpinner size="sm" /> Loading…
       </p>
 
       <p v-else-if="privacyLedger.status === 'error'" class="mt-2 text-red-400">
@@ -394,10 +466,9 @@ async function submitUnlockPassphrase() {
           Last access: {{ new Date(ledgerSummary.lastAccess).toLocaleString() }}
         </p>
       </div>
-    </section>
+    </UiSection>
 
-    <section class="mt-4 border-t border-neutral-800 pt-4">
-      <h2 class="text-xs font-semibold uppercase tracking-wide text-neutral-400">Vault</h2>
+    <UiSection title="Vault">
       <p class="mt-1 text-xs text-neutral-500">
         Personal data and backup/recovery have moved to the extension's Dashboard page
         (right-click the extension icon → Options).
@@ -409,7 +480,9 @@ async function submitUnlockPassphrase() {
            otherwise vault.store.ts's default state (initialized:false)
            would flash "set up your vault" on every popup open, even for an
            already-set-up vault, until the async VAULT_STATUS reply lands. -->
-      <p v-if="vault.status === 'idle'" class="mt-2 text-neutral-400">Loading…</p>
+      <p v-if="vault.status === 'idle'" class="mt-2 flex items-center gap-2 text-neutral-400">
+        <UiSpinner size="sm" /> Loading…
+      </p>
 
       <!-- No vault yet: setup. Checked before `locked` -- a brand-new,
            uninitialized vault also reports locked:true, so checking `locked`
@@ -417,33 +490,28 @@ async function submitUnlockPassphrase() {
       <div v-else-if="!vault.initialized" class="mt-2 space-y-3">
         <p class="text-neutral-400">Set up your vault to get started.</p>
 
-        <button
-          type="button"
-          class="w-full rounded bg-neutral-100 px-3 py-1.5 font-medium text-neutral-900 disabled:opacity-50"
-          :disabled="vault.status === 'loading'"
-          @click="clickSetupWithPasskey()"
-        >
+        <UiButton :loading="vault.status === 'loading'" @click="clickSetupWithPasskey()">
           Set up with Passkey (recommended)
-        </button>
+        </UiButton>
         <p class="text-xs text-neutral-500">
           Uses your device's biometric or security key. Recommended over a passphrase -- see
           ADR-012.
         </p>
 
         <form class="space-y-2" @submit.prevent="submitSetupPassphrase">
-          <input
+          <UiTextInput
             v-model="setupPassphrase"
             type="password"
             placeholder="Or choose a passphrase instead"
-            class="w-full rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-neutral-100"
           />
-          <button
+          <UiButton
             type="submit"
-            class="w-full rounded border border-neutral-700 px-3 py-1.5 text-neutral-300 disabled:opacity-50"
-            :disabled="vault.status === 'loading' || setupPassphrase.length === 0"
+            variant="secondary"
+            :disabled="setupPassphrase.length === 0"
+            :loading="vault.status === 'loading'"
           >
             Set up with Passphrase
-          </button>
+          </UiButton>
         </form>
       </div>
 
@@ -459,18 +527,16 @@ async function submitUnlockPassphrase() {
       <div v-else-if="vault.locked" class="mt-2 space-y-3">
         <p class="text-neutral-400">Vault is locked.</p>
 
-        <button
+        <UiButton
           v-if="
             vault.configuredUnlockMethod === undefined ||
             (vault.configuredUnlockMethod === 'passkey' && vault.passkeyCredentialId)
           "
-          type="button"
-          class="w-full rounded bg-neutral-100 px-3 py-1.5 font-medium text-neutral-900 disabled:opacity-50"
-          :disabled="vault.status === 'loading'"
+          :loading="vault.status === 'loading'"
           @click="clickUnlockWithPasskey()"
         >
           Unlock with Passkey
-        </button>
+        </UiButton>
 
         <form
           v-if="
@@ -481,19 +547,15 @@ async function submitUnlockPassphrase() {
           class="space-y-2"
           @submit.prevent="submitUnlockPassphrase"
         >
-          <input
-            v-model="unlockPassphrase"
-            type="password"
-            placeholder="Passphrase"
-            class="w-full rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-neutral-100"
-          />
-          <button
+          <UiTextInput v-model="unlockPassphrase" type="password" placeholder="Passphrase" />
+          <UiButton
             type="submit"
-            class="w-full rounded border border-neutral-700 px-3 py-1.5 text-neutral-300 disabled:opacity-50"
-            :disabled="vault.status === 'loading' || unlockPassphrase.length === 0"
+            variant="secondary"
+            :disabled="unlockPassphrase.length === 0"
+            :loading="vault.status === 'loading'"
           >
             Unlock with Passphrase
-          </button>
+          </UiButton>
         </form>
       </div>
 
@@ -503,15 +565,15 @@ async function submitUnlockPassphrase() {
            note above. -->
       <div v-else class="mt-2 space-y-3">
         <p class="text-green-400">Vault unlocked.</p>
-        <button
-          type="button"
-          class="rounded border border-neutral-700 px-3 py-1.5 text-neutral-300 disabled:opacity-50"
-          :disabled="vault.status === 'loading'"
+        <UiButton
+          :block="false"
+          variant="secondary"
+          :loading="vault.status === 'loading'"
           @click="vault.lock()"
         >
           Lock
-        </button>
+        </UiButton>
       </div>
-    </section>
+    </UiSection>
   </main>
 </template>

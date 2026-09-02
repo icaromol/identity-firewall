@@ -24,9 +24,6 @@ export interface PendingCredentialStoreState {
   confirming: boolean;
   discarding: boolean;
   actionError: string | null;
-  // The just-saved record, shown briefly after a successful confirm --
-  // cleared again on the next fetch.
-  savedCredential: CredentialRecord | null;
 }
 
 export const usePendingCredentialStore = defineStore('pendingCredential', {
@@ -39,14 +36,12 @@ export const usePendingCredentialStore = defineStore('pendingCredential', {
     confirming: false,
     discarding: false,
     actionError: null,
-    savedCredential: null,
   }),
   actions: {
     async fetchPendingCredential(): Promise<void> {
       this.status = 'loading';
       this.error = null;
       this.actionError = null;
-      this.savedCredential = null;
 
       try {
         const { tabId, origin } = await resolveActiveTab();
@@ -88,7 +83,6 @@ export const usePendingCredentialStore = defineStore('pendingCredential', {
           await browser.runtime.sendMessage(message);
 
         if (response.ok) {
-          this.savedCredential = response.data;
           this.pending = null;
         } else {
           this.actionError = response.error;

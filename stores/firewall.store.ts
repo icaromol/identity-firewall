@@ -258,19 +258,40 @@ export const useFirewallStore = defineStore('firewall', {
     // 'ask' on purpose, and this lets the user clear those in one click
     // rather than one at a time. Leaves required fields exactly as they
     // are -- only touches fields apparentlyRequired === false.
-    applyDenyOptional(): void {
+    // Returns how many fields it actually CHANGED, not how many it merely
+    // iterated over -- a /code-review finding caught a first version that
+    // counted every eligible field regardless of its existing value,
+    // which would fire the popup's own confirming toast a second time on
+    // a redundant re-click that changed nothing (every eligible field is
+    // already 'deny' from the first click). Comparing against the
+    // existing decision first is also why this doesn't just delegate to
+    // setDecision() unconditionally.
+    applyDenyOptional(): number {
+      let count = 0;
       for (const form of this.forms) {
         form.fields.forEach((field, index) => {
-          if (field.fieldType && !field.apparentlyRequired) {
+          if (!field.fieldType || field.apparentlyRequired) return;
+          const key = compoundKey(form.formIndex, getFieldKey(field, index));
+          if (this.decisions[key] !== 'deny') {
             this.setDecision(form.formIndex, getFieldKey(field, index), 'deny');
+            count++;
           }
         });
       }
+      return count;
     },
 
-    async submitForm(formIndex: number): Promise<void> {
+    // Returns whether it actually attempted the submission -- false for
+    // the same reason applyDenyOptional() above now reports a count
+    // rather than void: the early-return guard below (a stale formIndex,
+    // e.g. after this.forms was reassigned by an unrelated refresh
+    // in-flight at the same time) previously left submitErrors untouched,
+    // which the popup's own toast wrapper read as "no error, so it must
+    // have succeeded" for a call that never even ran (a /code-review
+    // finding).
+    async submitForm(formIndex: number): Promise<boolean> {
       const form = this.forms.find((f) => f.formIndex === formIndex);
-      if (!form || this.origin === null || this.tabId === null) return;
+      if (!form || this.origin === null || this.tabId === null) return false;
 
       this.submittingFormIndex = formIndex;
       delete this.submitErrors[formIndex];
@@ -291,8 +312,10 @@ export const useFirewallStore = defineStore('firewall', {
         const response: MessageResponse<SubmitFieldDecisionsResponse> =
           await browser.runtime.sendMessage(message);
         if (!response.ok) this.submitErrors[formIndex] = response.error;
+        return response.ok;
       } catch (err) {
         this.submitErrors[formIndex] = err instanceof Error ? err.message : String(err);
+        return false;
       } finally {
         this.submittingFormIndex = null;
       }

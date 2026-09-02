@@ -211,14 +211,40 @@ describe('useFirewallStore', () => {
     mockActiveTab();
     vi.spyOn(fakeBrowser.runtime, 'sendMessage').mockResolvedValueOnce({
       ok: true,
-      data: { forms: formsWithOptionalEmail, availableResponses: { email: ['real', 'deny'] } },
+      data: {
+        forms: formsWithOptionalEmail,
+        availableResponses: { email: ['real', 'deny'] },
+        // An explicit stored policy resolves this optional field to
+        // 'real' rather than leaving it at 'ask' (which would already
+        // auto-default to 'deny' on load per the privacy-default-picker
+        // behavior above) -- this is the actual case applyDenyOptional
+        // exists for: overriding a policy-resolved non-deny decision in
+        // one click, not re-stating a decision that's already 'deny'.
+        resolvedActions: { email: 'real' },
+      },
     } as never);
 
     const store = useFirewallStore();
     await store.fetchPendingRequest();
-    store.applyDenyOptional();
+    expect(store.getDecision(0, emailKey)).toBe('real'); // policy-resolved, before the click
+
+    const count = store.applyDenyOptional();
 
     expect(store.getDecision(0, emailKey)).toBe('deny');
+    expect(count).toBe(1);
+  });
+
+  it('applyDenyOptional returns 0 when there are no optional fields to touch', async () => {
+    mockActiveTab();
+    vi.spyOn(fakeBrowser.runtime, 'sendMessage').mockResolvedValueOnce({
+      ok: true,
+      data: { forms: sampleForms, availableResponses: { email: ['real', 'deny'] } },
+    } as never); // sampleForms' one classified field (email) is required
+
+    const store = useFirewallStore();
+    await store.fetchPendingRequest();
+
+    expect(store.applyDenyOptional()).toBe(0);
   });
 
   it('submitForm sends only the decisions actually set for that form, scoped by tabId/origin', async () => {
