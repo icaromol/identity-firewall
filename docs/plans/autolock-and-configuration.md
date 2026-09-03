@@ -1,6 +1,6 @@
 # Auto-Lock, a Configuration tab, and per-field default policies
 
-**Status:** in progress.
+**Status:** M1-M5 complete (settings scaffolding, auto-lock mechanism, Configuration tab, credential auto-save wiring, Personal Data policy dropdowns). M6 (manual verification + docs sync) partially done: ADR-017/ADR-018 written; real-browser manual verification of auto-lock actually firing is still outstanding.
 **Roadmap reference:** [`../roadmap.md`](../roadmap.md), Phase 7 Part A ("Vault Session Security & Biometric Authorization"). Folded into the existing, not-yet-started Phase 7 alongside biometrics (Part B) rather than triggering a third full roadmap renumbering — both parts are about the vault's authorization lifecycle, neither depends on the other, and Phase 2 already has precedent for one phase carrying two plan docs (`phase-2-local-identity-vault.md` + `phase-2-vault-tiering-refactor.md`).
 
 ## Context
@@ -53,17 +53,17 @@ Fourth tab (`entrypoints/options/App.vue`'s `TABS` array), icon e.g. `Settings` 
 
 ## Milestones
 
-- **M1 — `background/settings/` scaffolding.** Storage, schema, handler, router registration, `GET_APP_SETTINGS`/`SET_APP_SETTINGS`, `stores/appSettings.store.ts`. No UI, no auto-lock logic yet — unit-tested the same way Phase 2 built `GET_PERSONAL_DATA` before Phase 5 gave it a UI.
-- **M2 — Auto-lock mechanism.** `background/settings/idleLock.ts`, the `'idle'` permission, wiring `chrome.idle.onStateChanged` to `lockVault()`. Needs an early research step: confirm whether `wxt/testing/fake-browser` mocks `chrome.idle` at all for unit tests, or whether this milestone's verification has to lean more heavily on manual/e2e testing (matching this project's own "verify tooling facts, don't assume" convention) — not yet checked.
-- **M3 — Configuration tab UI.** The new Dashboard tab, wired to `appSettings.store.ts`; the disabled "Auto-fill" placeholder and its tooltip.
-- **M4 — Credential auto-save wiring.** `credentialSaveMode: 'auto'` actually skipping the popup prompt, plus the confirming toast.
-- **M5 — Personal Data per-field policy dropdowns.** `stores/policies.store.ts`, the six dropdowns in the existing "Personal data" tab.
-- **M6 — Manual verification + docs sync.** Real-browser check that idle detection genuinely locks the vault after the configured interval (this is the one behavior that can't be meaningfully faked in a unit test); new ADR(s) (see below); `CLAUDE.md` status line.
+- **M1 — `background/settings/` scaffolding. Complete.** Storage, schema, handler, router registration, `GET_APP_SETTINGS`/`SET_APP_SETTINGS`, `stores/appSettings.store.ts`.
+- **M2 — Auto-lock mechanism. Complete.** `background/settings/idleLock.ts`, the `'idle'` permission, wiring `chrome.idle.onStateChanged` to `lockVault()`. Confirmed: `wxt/testing/fake-browser` does **not** mock `chrome.idle` at all (throws `MockNotImplementedError` on any call) — unit tests stub it via `vi.spyOn`.
+- **M3 — Configuration tab UI. Complete.** The new Dashboard tab, wired to `appSettings.store.ts`; the disabled "Auto-fill" placeholder and its tooltip.
+- **M4 — Credential auto-save wiring. Complete.** `credentialSaveMode: 'auto'` actually skips the popup prompt via `saveCredential()`, falling back to staging when the Vault is locked; a one-time `autoSaveNotice.ts` flag stands in for a live toast (popups don't stay mounted to receive a background push at an arbitrary later moment).
+- **M5 — Personal Data per-field policy dropdowns. Complete.** `stores/policies.store.ts`, the six dropdowns in the existing "Personal data" tab, `GET_POLICIES` extended with server-computed `availableResponses`.
+- **M6 — Manual verification + docs sync. Partially done.** ADR-017/ADR-018 written (below); `CLAUDE.md` status line updated. Still outstanding: a real-browser check that idle detection genuinely locks the vault after the configured interval — the one behavior in this whole plan that can't be meaningfully faked in a unit test.
 
 ## New ADRs
 
-- **Auto-lock via `chrome.idle`** — the mechanism choice (§ decisions 1–2 above) and why `chrome.alarms` doesn't fit.
-- **`background/settings/` as a separably-extractable module** — the module-boundary decision itself, explicit that this is a *code-organization* choice, not a reversal of ADR-001/ADR-007/ADR-009 (local-first, no-server-dependency, personal-project-not-startup): no server dependency is introduced by this plan; the module is just structured so one could be added later without entangling it with vault/identity code.
+- [ADR-017](../adr/ADR-017-auto-lock-via-chrome-idle.md) — the `chrome.idle` mechanism choice and why `chrome.alarms` doesn't fit.
+- [ADR-018](../adr/ADR-018-settings-module-boundary.md) — the `background/settings/` module-boundary decision, explicit that this is a *code-organization* choice, not a reversal of ADR-001/ADR-007/ADR-009 (local-first, no-server-dependency, personal-project-not-startup).
 
 ## Verification
 
