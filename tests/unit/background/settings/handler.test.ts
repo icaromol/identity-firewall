@@ -65,4 +65,53 @@ describe('app settings handlers', () => {
     expect(result).toEqual({ ...DEFAULT_APP_SETTINGS, autoLockSeconds: 120 });
     expect(await handleGetAppSettings({ type: 'GET_APP_SETTINGS', payload: {} })).toEqual(result);
   });
+
+  // Regression test for the exact race /code-review's verification pass
+  // found and setAppSettings's afterWrite parameter exists to close: a
+  // slow autoLockSeconds save's own chrome.idle call must not let a
+  // faster, unrelated concurrent save's response resolve first and then
+  // get silently overwritten by the slow call's now-stale `next` in the
+  // Pinia store. Confirms request order is preserved end to end, not just
+  // that the final persisted value happens to be correct.
+  it('resolves two overlapping SET_APP_SETTINGS calls in request order, not settle order', async () => {
+    let resolveSlowInterval: () => void = () => {};
+    const slowInterval = new Promise<void>((resolve) => {
+      resolveSlowInterval = resolve;
+    });
+    vi.spyOn(fakeBrowser.idle, 'setDetectionInterval').mockImplementation((seconds) =>
+      seconds === 3600 ? slowInterval : Promise.resolve(undefined),
+    );
+
+    const order: string[] = [];
+    const callA = handleSetAppSettings({
+      type: 'SET_APP_SETTINGS',
+      payload: { autoLockSeconds: 3600 },
+    }).then((result) => {
+      order.push('A');
+      return result;
+    });
+    const callB = handleSetAppSettings({
+      type: 'SET_APP_SETTINGS',
+      payload: { credentialSaveMode: 'auto' },
+    }).then((result) => {
+      order.push('B');
+      return result;
+    });
+
+    // B is queued behind A's whole write-then-chrome.idle task -- it
+    // cannot resolve while A's own chrome.idle call is still pending,
+    // regardless of how much faster B's own write would otherwise be.
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(order).toEqual([]);
+
+    resolveSlowInterval();
+    const [resultA, resultB] = await Promise.all([callA, callB]);
+
+    expect(order).toEqual(['A', 'B']);
+    expect(resultA.autoLockSeconds).toBe(3600);
+    // B's response reflects BOTH changes -- it read A's already-committed
+    // write, and nothing lets A's stale `next` clobber it afterward.
+    expect(resultB).toEqual({ autoLockSeconds: 3600, credentialSaveMode: 'auto' });
+  });
 });

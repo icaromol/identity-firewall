@@ -8,8 +8,10 @@ import { defineStore } from 'pinia';
 import { browser } from 'wxt/browser';
 import type {
   GetAppSettingsMessage,
+  GetAppSettingsResponse,
   MessageResponse,
   SetAppSettingsMessage,
+  SetAppSettingsResponse,
 } from '../shared/messages';
 import type { AppSettings } from '../shared/settings';
 import { DEFAULT_APP_SETTINGS } from '../shared/settings';
@@ -40,7 +42,8 @@ export const useAppSettingsStore = defineStore('appSettings', {
       const message: GetAppSettingsMessage = { type: 'GET_APP_SETTINGS', payload: {} };
 
       try {
-        const response: MessageResponse<AppSettings> = await browser.runtime.sendMessage(message);
+        const response: MessageResponse<GetAppSettingsResponse> =
+          await browser.runtime.sendMessage(message);
         if (response.ok) {
           this.data = response.data;
           this.status = 'loaded';
@@ -62,7 +65,8 @@ export const useAppSettingsStore = defineStore('appSettings', {
       const message: SetAppSettingsMessage = { type: 'SET_APP_SETTINGS', payload: patch };
 
       try {
-        const response: MessageResponse<AppSettings> = await browser.runtime.sendMessage(message);
+        const response: MessageResponse<SetAppSettingsResponse> =
+          await browser.runtime.sendMessage(message);
         if (response.ok) {
           this.data = response.data;
           this.justSaved = true;

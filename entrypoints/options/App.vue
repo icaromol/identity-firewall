@@ -18,15 +18,19 @@
 // template binding, which Biome's <script>-only lint pass can't see,
 // hence the blanket ignore for this whole import block.
 // biome-ignore-start lint/correctness/noUnusedImports: used in <template> -- Biome only lints the <script> block, it can't see template usage.
-import { Check, DatabaseBackup, ScrollText, Shield, UserRound, X } from '@lucide/vue';
+import { Check, DatabaseBackup, ScrollText, Settings, Shield, UserRound, X } from '@lucide/vue';
 import { computed, onMounted, reactive, ref } from 'vue';
 import UiButton from '../../components/ui/UiButton.vue';
 import UiSpinner from '../../components/ui/UiSpinner.vue';
 import UiTextInput from '../../components/ui/UiTextInput.vue';
 import UiToastHost from '../../components/ui/UiToastHost.vue';
+import UiToggle from '../../components/ui/UiToggle.vue';
+import UiTooltip from '../../components/ui/UiTooltip.vue';
 // biome-ignore-end lint/correctness/noUnusedImports: used in <template>
+import { isAutoLockDisabled } from '../../shared/settings';
 import type { PersonalData, PrivacyLedgerEntry } from '../../shared/vault-schema';
 import { useAllSitesLedgerStore } from '../../stores/allSitesLedger.store';
+import { useAppSettingsStore } from '../../stores/appSettings.store';
 import { usePersonalDataStore } from '../../stores/personalData.store';
 import { type LedgerSummary, summarizeLedgerEntries } from '../../stores/shared/ledgerSummary';
 import { useToastStore } from '../../stores/shared/toast.store';
@@ -36,8 +40,9 @@ const allSitesLedger = useAllSitesLedgerStore();
 const personalData = usePersonalDataStore();
 const vault = useVaultStore();
 const toast = useToastStore();
+const appSettings = useAppSettingsStore();
 
-type Tab = 'ledger' | 'personalData' | 'backup';
+type Tab = 'ledger' | 'personalData' | 'backup' | 'configuration';
 // biome-ignore lint/correctness/noUnusedVariables: read/written from <template> -- Biome only lints the <script> block, it can't see template usage.
 const activeTab = ref<Tab>('ledger');
 
@@ -46,6 +51,7 @@ const TABS: { value: Tab; label: string; icon: typeof ScrollText }[] = [
   { value: 'ledger', label: 'Who knows what about me', icon: ScrollText },
   { value: 'personalData', label: 'Personal data', icon: UserRound },
   { value: 'backup', label: 'Backup & recovery', icon: DatabaseBackup },
+  { value: 'configuration', label: 'Configuration', icon: Settings },
 ];
 
 // Per-origin version of entrypoints/popup/App.vue's own ledgerSummary
@@ -97,7 +103,72 @@ onMounted(() => {
   personalData.fetchPersonalData().then(() => {
     if (personalData.status === 'loaded') Object.assign(personalDataForm, personalData.data);
   });
+  appSettings.fetchAppSettings();
 });
+
+// Auto-lock is a <select>, not a UiToggle (unlike credentialSaveMode
+// below) -- more than two states (30s/1min/5min/15min/30min/1hr/Never),
+// so a plain native <select> is the simplest fit for one-off control
+// like this; no UiSelect component exists yet and one control doesn't
+// warrant introducing one.
+const BASE_AUTO_LOCK_OPTIONS: { value: string; label: string }[] = [
+  { value: '30', label: '30 seconds' },
+  { value: '60', label: '1 minute' },
+  { value: '300', label: '5 minutes' },
+  { value: '900', label: '15 minutes' },
+  { value: '1800', label: '30 minutes' },
+  { value: '3600', label: '1 hour' },
+  { value: 'never', label: 'Never' },
+];
+
+// A native <select> can only ever hold a string value -- 'never' is the
+// sentinel this computed maps to/from AppSettings' own `null` ("never
+// auto-lock"). Applies immediately on change (no separate Save button),
+// matching the popup's own Safe Mode toggle convention: this is a
+// preference switch, not a form.
+const autoLockSelectValue = computed<string>({
+  get: () =>
+    isAutoLockDisabled(appSettings.data.autoLockSeconds)
+      ? 'never'
+      : String(appSettings.data.autoLockSeconds),
+  set: async (value: string) => {
+    const autoLockSeconds = value === 'never' ? null : Number(value);
+    await appSettings.saveAppSettings({ autoLockSeconds });
+    if (appSettings.justSaved) toast.push('Auto-lock updated.', 'success');
+  },
+});
+
+// AppSettingsSchema allows any positive integer, not just the seven
+// values this UI offers -- if a stored autoLockSeconds ever falls outside
+// BASE_AUTO_LOCK_OPTIONS (a direct SET_APP_SETTINGS call, a future
+// migration, manual storage editing), a plain <select> would silently
+// fall back to displaying its first option while the real value is
+// something else entirely (/code-review, verification pass). Synthesizing
+// a matching option for whatever the current value actually is keeps the
+// dropdown always honest about what's stored, even for a value this UI
+// doesn't itself offer choosing.
+// biome-ignore lint/correctness/noUnusedVariables: read from <template> -- Biome only lints the <script> block, it can't see template usage.
+const autoLockOptions = computed<{ value: string; label: string }[]>(() => {
+  const current = autoLockSelectValue.value;
+  if (BASE_AUTO_LOCK_OPTIONS.some((option) => option.value === current)) {
+    return BASE_AUTO_LOCK_OPTIONS;
+  }
+  return [...BASE_AUTO_LOCK_OPTIONS, { value: current, label: `${current} seconds` }];
+});
+
+// Mirrors the popup's own toggleHighTrust() re-entrancy guard --
+// appSettings.saving is this store's equivalent of firewall's
+// togglingHighTrust, guarding against a double-click firing two
+// concurrent saves.
+// biome-ignore lint/correctness/noUnusedVariables: called from @update:model-value in <template> -- Biome only lints the <script> block, it can't see template usage.
+async function toggleCredentialSaveMode(): Promise<void> {
+  if (appSettings.saving) return;
+  const next = appSettings.data.credentialSaveMode === 'auto' ? 'ask' : 'auto';
+  await appSettings.saveAppSettings({ credentialSaveMode: next });
+  if (appSettings.justSaved) {
+    toast.push(next === 'auto' ? 'Auto-save enabled.' : 'Auto-save disabled.', 'success');
+  }
+}
 
 // biome-ignore lint/correctness/noUnusedVariables: called from @submit.prevent in <template> -- Biome only lints the <script> block, it can't see template usage.
 async function submitPersonalData(): Promise<void> {
@@ -338,6 +409,79 @@ async function submitRestoreWithPassphrase(): Promise<void> {
             Download backup
           </UiButton>
         </form>
+      </div>
+    </section>
+
+    <section v-if="activeTab === 'configuration'" class="mt-6 max-w-md space-y-4">
+      <p
+        v-if="appSettings.status === 'idle' || appSettings.status === 'loading'"
+        class="flex items-center gap-2 text-if-muted"
+      >
+        <UiSpinner size="sm" /> Loading…
+      </p>
+
+      <p v-else-if="appSettings.status === 'error'" class="text-red-600">
+        {{ appSettings.error }}
+      </p>
+
+      <div v-else class="space-y-4">
+        <div class="rounded border border-if-hairline p-3">
+          <label for="auto-lock-select" class="font-heading text-xs font-bold uppercase tracking-wide text-if-muted">
+            Auto-lock after
+          </label>
+          <p class="mt-1 text-xs text-if-faint">
+            Locks the vault after this much inactivity, or immediately if the OS screen locks.
+          </p>
+          <select
+            id="auto-lock-select"
+            v-model="autoLockSelectValue"
+            :disabled="appSettings.saving"
+            class="mt-2 w-full rounded border border-if-hairline bg-if-white p-1.5 text-sm text-if-navy disabled:opacity-50"
+          >
+            <option v-for="option in autoLockOptions" :key="option.value" :value="option.value">
+              {{ option.label }}
+            </option>
+          </select>
+        </div>
+
+        <div class="rounded border border-if-hairline p-3">
+          <p class="font-heading text-xs font-bold uppercase tracking-wide text-if-muted">
+            Saving a new login
+          </p>
+          <div class="mt-2">
+            <UiToggle
+              :model-value="appSettings.data.credentialSaveMode === 'auto'"
+              :disabled="appSettings.saving"
+              @update:model-value="toggleCredentialSaveMode()"
+            >
+              <span class="text-sm text-if-navy">Auto-save without asking</span>
+            </UiToggle>
+          </div>
+          <p class="mt-1 text-xs text-if-faint">
+            Off (default): a "Save this login?" prompt appears every time. On: your preference is
+            saved now, but new logins still ask until auto-save is wired up (coming next).
+          </p>
+        </div>
+
+        <div class="rounded border border-if-hairline p-3">
+          <p class="font-heading text-xs font-bold uppercase tracking-wide text-if-muted">
+            Filling a saved login
+          </p>
+          <div class="mt-2 flex items-center gap-3 text-sm">
+            <span class="text-if-navy">Manual (click Fill)</span>
+            <UiTooltip
+              v-slot="{ id }"
+              text="Coming in a later phase, once biometric authorization gates it -- see Phase 8."
+            >
+              <label class="flex items-center gap-1.5 text-if-faint" :aria-describedby="id">
+                <input type="radio" disabled />
+                Auto-fill
+              </label>
+            </UiTooltip>
+          </div>
+        </div>
+
+        <p v-if="appSettings.saveError" class="text-xs text-red-600">{{ appSettings.saveError }}</p>
       </div>
     </section>
   </main>

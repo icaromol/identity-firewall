@@ -30,6 +30,20 @@ export const AppSettingsSchema = z.object({
 });
 export type AppSettings = z.infer<typeof AppSettingsSchema>;
 
+// Single source of truth for what the `null` sentinel means -- /code-
+// review's verification pass flagged that autoLockSeconds === null was
+// being independently re-checked in multiple places across
+// background/settings/idleLock.ts (once to decide the chrome.idle
+// interval, once to decide whether to actually lock), which is exactly
+// the shape of bug that already shipped once here (see idleLock.ts's own
+// comment on the 'locked'-vs-'idle' fix): a scattered sentinel check is
+// easy to place in a spot where it silently changes the wrong behavior.
+// Callers that mean "should locking ever happen at all" should use this,
+// not repeat the `=== null` check themselves.
+export function isAutoLockDisabled(autoLockSeconds: number | null): autoLockSeconds is null {
+  return autoLockSeconds === null;
+}
+
 // 30 seconds, per the user's own explicit default request.
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   autoLockSeconds: 30,

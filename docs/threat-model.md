@@ -97,6 +97,8 @@ Credentials
 
 The Vault must remain encrypted at rest such that physical possession of the device, without the unlock factor (PIN/biometric/device key), does not yield the private keys, personal data, or credentials inside it. See [security-model.md](security-model.md) for the encryption mechanism and [biometric-model.md](biometric-model.md) for how the unlock factor itself works.
 
+**A related, narrower scenario this attacker definition does not itself cover:** the device is neither powered off nor OS-locked, but the user has walked away with the Vault still unlocked from an earlier session — an in-between state that is neither "actively supervised" nor "offline." Before Phase 7 Part A, nothing closed this gap; the Vault stayed unlocked indefinitely until the user explicitly clicked Lock. Phase 7 Part A's auto-lock (`background/settings/idleLock.ts`, via `chrome.idle`) mitigates this by re-locking after a configurable period of system-wide inactivity, and immediately on an OS screen lock regardless of that configured period — treating an actual screen lock as at least as strong a signal as the device being stolen while locked outright. See [docs/plans/autolock-and-configuration.md](plans/autolock-and-configuration.md) for the mechanism's own design decisions.
+
 ### Attacker E — Vulnerability in our own product
 
 **Behavior:** The Identity Firewall's own software has a bug or vulnerability — this is treated as a certainty to design around, not a hypothetical.

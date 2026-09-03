@@ -109,3 +109,53 @@ test('the Backup & Recovery tab exports a real backup file once unlocked', async
   // this action has ever had.
   await expect(options.getByRole('status').filter({ hasText: 'Backup downloaded.' })).toBeVisible();
 });
+
+// Phase 7 Part A M3 -- unlike every other tab, Configuration doesn't
+// depend on the vault being unlocked at all (background/settings/ is
+// plain browser.storage.local, by design -- see
+// docs/plans/autolock-and-configuration.md's module-boundary decision),
+// so this is fully e2e-testable on a completely fresh context.
+test('the Configuration tab shows and persists app-settings changes', async ({
+  context,
+  extensionId,
+}) => {
+  const options = await context.newPage();
+  await options.goto(`chrome-extension://${extensionId}/options.html`);
+  await options.getByRole('button', { name: 'Configuration' }).click();
+
+  const autoLockSelect = options.getByLabel('Auto-lock after');
+  await expect(autoLockSelect).toHaveValue('30');
+
+  const autoSaveToggle = options.getByRole('checkbox', { name: 'Auto-save without asking' });
+  await expect(autoSaveToggle).not.toBeChecked();
+
+  await expect(options.getByText('Manual (click Fill)')).toBeVisible();
+  await expect(options.getByRole('radio', { name: 'Auto-fill' })).toBeDisabled();
+
+  // Applies immediately, no separate Save button -- matches the popup's
+  // own Safe Mode toggle convention for a preference switch.
+  //
+  // A forced click, not .check() -- UiToggle's real <input type=checkbox>
+  // is visually hidden (Tailwind's sr-only) underneath the visible track
+  // span that carries the actual styling, so Playwright's default
+  // actionability check can never find a clickable point on the input
+  // itself. The underlying interaction genuinely works for a real mouse
+  // user (the surrounding <label> forwards the click to the control) --
+  // this is a known, already-accepted testing limitation of this exact
+  // custom-toggle pattern, not a real bug in the component.
+  await autoLockSelect.selectOption('never');
+  await autoSaveToggle.click({ force: true });
+
+  // autoLockSelectValue/the toggle's :model-value both read straight from
+  // the store's own `data`, which only updates once SET_APP_SETTINGS's
+  // response actually resolves -- waiting for both here (rather than
+  // reloading immediately) confirms the round trip settled before
+  // asserting persistence, instead of racing it (/code-review, angle B).
+  await expect(autoLockSelect).toHaveValue('never');
+  await expect(autoSaveToggle).toBeChecked();
+
+  await options.reload();
+  await options.getByRole('button', { name: 'Configuration' }).click();
+  await expect(options.getByLabel('Auto-lock after')).toHaveValue('never');
+  await expect(options.getByRole('checkbox', { name: 'Auto-save without asking' })).toBeChecked();
+});

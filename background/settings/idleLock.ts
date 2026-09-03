@@ -26,9 +26,9 @@
 // "Never".
 
 import { browser } from 'wxt/browser';
-import { MIN_AUTO_LOCK_SECONDS } from '../../shared/settings';
+import { isAutoLockDisabled, MIN_AUTO_LOCK_SECONDS } from '../../shared/settings';
 import { lockVault } from '../vault/unlock';
-import { getAppSettings } from './storage';
+import { getAppSettings, setAppSettings } from './storage';
 
 const LOCKING_STATES: ReadonlySet<string> = new Set(['idle', 'locked']);
 
@@ -37,7 +37,7 @@ export function shouldLockOnIdleState(state: string): boolean {
 }
 
 export function detectionIntervalSecondsFor(autoLockSeconds: number | null): number {
-  if (autoLockSeconds === null) return MIN_AUTO_LOCK_SECONDS;
+  if (isAutoLockDisabled(autoLockSeconds)) return MIN_AUTO_LOCK_SECONDS;
   return Math.max(MIN_AUTO_LOCK_SECONDS, autoLockSeconds);
 }
 
@@ -54,7 +54,7 @@ export async function handleIdleStateChanged(state: string): Promise<void> {
   }
 
   const settings = await getAppSettings();
-  if (settings.autoLockSeconds === null) return;
+  if (isAutoLockDisabled(settings.autoLockSeconds)) return;
 
   await lockVault();
 }
@@ -95,9 +95,19 @@ export function initIdleLock(): void {
     });
   });
 
-  getAppSettings()
-    .then((settings) => applyDetectionInterval(settings.autoLockSeconds))
-    .catch((err) => {
+  // Routed through setAppSettings's own queue (an empty patch -- nothing
+  // to actually change, only the ordered afterWrite matters here), not a
+  // bare getAppSettings().then(...) chain -- /code-review's verification
+  // pass found that an un-enqueued startup read could resolve *after* a
+  // concurrent SET_APP_SETTINGS call's own (correctly queued) interval
+  // apply, silently reverting chrome.idle's real interval back to the
+  // stale pre-respawn value even though storage and the UI both already
+  // show the new one. A real window on every MV3 service-worker respawn
+  // while the Options page happens to be open, not just a startup-only
+  // concern.
+  setAppSettings({}, (settings) => applyDetectionInterval(settings.autoLockSeconds)).catch(
+    (err) => {
       console.error('Identity Firewall: failed to apply the stored auto-lock interval', err);
-    });
+    },
+  );
 }
