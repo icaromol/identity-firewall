@@ -1,6 +1,6 @@
 # Auto-Lock, a Configuration tab, and per-field default policies
 
-**Status:** M1-M5 complete (settings scaffolding, auto-lock mechanism, Configuration tab, credential auto-save wiring, Personal Data policy dropdowns). M6 (manual verification + docs sync) partially done: ADR-017/ADR-018 written; real-browser manual verification of auto-lock actually firing is still outstanding.
+**Status:** Complete (M1-M6). Manually verified in a real Chromium browser: an OS screen lock (Win+L) locks the vault immediately regardless of configured duration, and the 30-second idle timer itself locks the vault once genuine system-wide inactivity is reached.
 **Roadmap reference:** [`../roadmap.md`](../roadmap.md), Phase 7 Part A ("Vault Session Security & Biometric Authorization"). Folded into the existing, not-yet-started Phase 7 alongside biometrics (Part B) rather than triggering a third full roadmap renumbering — both parts are about the vault's authorization lifecycle, neither depends on the other, and Phase 2 already has precedent for one phase carrying two plan docs (`phase-2-local-identity-vault.md` + `phase-2-vault-tiering-refactor.md`).
 
 ## Context
@@ -58,7 +58,7 @@ Fourth tab (`entrypoints/options/App.vue`'s `TABS` array), icon e.g. `Settings` 
 - **M3 — Configuration tab UI. Complete.** The new Dashboard tab, wired to `appSettings.store.ts`; the disabled "Auto-fill" placeholder and its tooltip.
 - **M4 — Credential auto-save wiring. Complete.** `credentialSaveMode: 'auto'` actually skips the popup prompt via `saveCredential()`, falling back to staging when the Vault is locked; a one-time `autoSaveNotice.ts` flag stands in for a live toast (popups don't stay mounted to receive a background push at an arbitrary later moment).
 - **M5 — Personal Data per-field policy dropdowns. Complete.** `stores/policies.store.ts`, the six dropdowns in the existing "Personal data" tab, `GET_POLICIES` extended with server-computed `availableResponses`.
-- **M6 — Manual verification + docs sync. Partially done.** ADR-017/ADR-018 written (below); `CLAUDE.md` status line updated. Still outstanding: a real-browser check that idle detection genuinely locks the vault after the configured interval — the one behavior in this whole plan that can't be meaningfully faked in a unit test.
+- **M6 — Manual verification + docs sync. Complete.** ADR-017/ADR-018 written (below); `CLAUDE.md` status line updated. Manually verified in a real Chromium browser: Win+L locks the vault immediately (the 'locked' override), and the 30-second idle timer locks it after genuine system-wide inactivity (confirmed via `chrome.idle.queryState` in the background service worker's own console before and after the wait).
 
 ## New ADRs
 

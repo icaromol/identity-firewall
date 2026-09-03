@@ -297,6 +297,8 @@ Two related pieces of "when and how the vault stays authorized," folded into one
 
 ### Part A — Auto-lock, Configuration tab, per-field default policies
 
+**Complete**, including credential auto-save wiring and manual verification in a real browser (Win+L instant lock, and the idle timer itself after genuine inactivity) — see [`plans/autolock-and-configuration.md`](plans/autolock-and-configuration.md) for the full milestone breakdown and ADR-017/ADR-018.
+
 - Auto-lock the vault after a configurable period of system inactivity (default 30 seconds), via `chrome.idle` — a real gap in the vault's security posture that existed since Phase 2 (only an explicit Lock click ever locked it).
 - A new "Configuration" tab in the Dashboard (`entrypoints/options/`): auto-lock duration, credential save mode (ask/auto-save). Credential auto-*fill* is deliberately shown as a disabled placeholder here, not built — see Part B's own dependency note below.
 - A dropdown per field in the Dashboard's existing "Personal data" tab, exposing the Policy Engine's global per-field defaults (`GET_POLICIES`/`SET_POLICY`/`DELETE_POLICY`, built since Phase 4, never given a UI until now).
