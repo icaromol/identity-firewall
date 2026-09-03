@@ -524,13 +524,29 @@ export interface SubmitFieldDecisionsResponse {
   resolvedValues: Record<string, string>;
 }
 
-// GET_POLICIES/SET_POLICY/DELETE_POLICY's response payload shapes
-// (background/policy/handler.ts) -- all three return the full, current
-// policies array rather than just the one rule touched, so the popup
-// never needs a second round trip to refresh its own list after a write.
-export type GetPoliciesResponse = PolicyRule[];
+// SET_POLICY/DELETE_POLICY's response payload shape (background/policy/
+// handler.ts) -- both return the full, current policies array rather than
+// just the one rule touched, so the caller never needs a second round
+// trip to refresh its own list after a write.
 export type SetPolicyResponse = PolicyRule[];
 export type DeletePolicyResponse = PolicyRule[];
+
+// GET_POLICIES's response shape -- Phase 7 Part A M5 adds
+// availableResponses alongside the plain policies array PendingRequest's
+// own shape (above) already established this exact convention for: which
+// ResponseType choices are actually offerable per field is computed
+// server-side (background has PersonalData and aliasProviderConfig; the
+// Dashboard has neither) using the same responseAvailability.ts logic
+// SUBMIT_FIELD_DECISIONS re-validates against -- one source of truth for
+// "what's allowed," not a second client-side copy that could drift.
+// Unlike PendingRequest's version (keyed only by fieldTypes actually
+// present in a form), this covers all six PersonalDataFieldName keys
+// unconditionally, since the Personal Data tab's per-field default-policy
+// dropdowns aren't scoped to any one page's forms.
+export interface GetPoliciesResponse {
+  policies: PolicyRule[];
+  availableResponses: Record<PersonalDataFieldName, ResponseType[]>;
+}
 
 // SET_HIGH_TRUST_ORIGIN's response payload shape -- the full, current
 // list, same "avoid a second round trip" convention as the policy

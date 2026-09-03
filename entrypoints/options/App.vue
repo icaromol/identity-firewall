@@ -28,10 +28,17 @@ import UiToggle from '../../components/ui/UiToggle.vue';
 import UiTooltip from '../../components/ui/UiTooltip.vue';
 // biome-ignore-end lint/correctness/noUnusedImports: used in <template>
 import { isAutoLockDisabled } from '../../shared/settings';
-import type { PersonalData, PrivacyLedgerEntry } from '../../shared/vault-schema';
+import type {
+  PersonalData,
+  PersonalDataFieldName,
+  PolicyAction,
+  PrivacyLedgerEntry,
+} from '../../shared/vault-schema';
+import { PERSONAL_DATA_FIELD_DEFAULT_ACTION } from '../../shared/vault-schema';
 import { useAllSitesLedgerStore } from '../../stores/allSitesLedger.store';
 import { useAppSettingsStore } from '../../stores/appSettings.store';
 import { usePersonalDataStore } from '../../stores/personalData.store';
+import { usePoliciesStore } from '../../stores/policies.store';
 import { type LedgerSummary, summarizeLedgerEntries } from '../../stores/shared/ledgerSummary';
 import { useToastStore } from '../../stores/shared/toast.store';
 import { useVaultStore } from '../../stores/vault.store';
@@ -41,6 +48,7 @@ const personalData = usePersonalDataStore();
 const vault = useVaultStore();
 const toast = useToastStore();
 const appSettings = useAppSettingsStore();
+const policies = usePoliciesStore();
 
 type Tab = 'ledger' | 'personalData' | 'backup' | 'configuration';
 // biome-ignore lint/correctness/noUnusedVariables: read/written from <template> -- Biome only lints the <script> block, it can't see template usage.
@@ -104,6 +112,7 @@ onMounted(() => {
     if (personalData.status === 'loaded') Object.assign(personalDataForm, personalData.data);
   });
   appSettings.fetchAppSettings();
+  policies.fetchPolicies();
 });
 
 // Auto-lock is a <select>, not a UiToggle (unlike credentialSaveMode
@@ -174,6 +183,65 @@ async function toggleCredentialSaveMode(): Promise<void> {
 async function submitPersonalData(): Promise<void> {
   await personalData.savePersonalData({ ...personalDataForm });
   if (personalData.justSaved) toast.push('Saved.', 'success');
+}
+
+// Phase 7 Part A M5 -- the Policy Engine's own global per-field defaults
+// (background/policy/), fully working since Phase 4 with zero UI anywhere
+// until now. One dropdown per field, right next to its own input.
+const POLICY_ACTION_LABELS: Record<PolicyAction, string> = {
+  real: 'Real',
+  alias: 'Alias',
+  synthetic: 'Synthetic',
+  nonsense: 'Nonsense',
+  deny: 'Deny',
+  ask: 'Ask',
+};
+
+// 'default' is a UI-only sentinel, never sent as a PolicyAction -- it
+// means "no explicit global rule; fall back to
+// PERSONAL_DATA_FIELD_DEFAULT_ACTION," which is a materially different
+// thing from an explicit 'ask' override (the latter freezes the choice
+// even if the hardcoded default ever changes later).
+// biome-ignore lint/correctness/noUnusedVariables: called from <template> -- Biome only lints the <script> block, it can't see template usage.
+function globalPolicyOptions(fieldType: PersonalDataFieldName): { value: string; label: string }[] {
+  const allowed = policies.availableResponses[fieldType] ?? [];
+  const defaultAction = PERSONAL_DATA_FIELD_DEFAULT_ACTION[fieldType];
+  return [
+    { value: 'default', label: `Default (${POLICY_ACTION_LABELS[defaultAction]})` },
+    ...allowed.map((action) => ({ value: action, label: POLICY_ACTION_LABELS[action] })),
+    { value: 'ask', label: POLICY_ACTION_LABELS.ask },
+  ];
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: called from <template> -- Biome only lints the <script> block, it can't see template usage.
+function currentGlobalPolicyValue(fieldType: PersonalDataFieldName): string {
+  const rule = policies.policies.find(
+    (p) => p.scope.kind === 'global' && p.fieldType === fieldType,
+  );
+  return rule ? rule.action : 'default';
+}
+
+// Forces every policy <select> below to remount after any change attempt
+// (success or failure) -- a native <select>'s own DOM value already
+// changes the moment the user picks an option (well before 'change'
+// fires), so if the underlying policy value doesn't actually change (a
+// failed save), Vue's vnode diff sees an unchanged :value prop and skips
+// reapplying it, leaving the DOM showing the user's picked-but-not-
+// persisted option. A forced remount re-derives the DOM from scratch
+// instead of diffing against what the browser already did on its own --
+// the same class of fix UiToggle's own :key trick uses elsewhere in this
+// project, adapted for a control preventDefault() can't help with (a
+// <select>'s visual change has already happened by the time 'change'
+// fires, unlike a checkbox's click).
+const policySelectRenderKey = ref(0);
+
+// biome-ignore lint/correctness/noUnusedVariables: called from @change in <template> -- Biome only lints the <script> block, it can't see template usage.
+async function onGlobalPolicyChange(fieldType: PersonalDataFieldName, event: Event): Promise<void> {
+  const value = (event.target as HTMLSelectElement).value;
+  const action = value === 'default' ? null : (value as PolicyAction);
+  await policies.setGlobalPolicy(fieldType, action);
+  policySelectRenderKey.value += 1;
+  if (!policies.saveError) toast.push('Default updated.', 'success');
 }
 
 // biome-ignore lint/correctness/noUnusedVariables: called from @submit.prevent in <template> -- Biome only lints the <script> block, it can't see template usage.
@@ -302,15 +370,112 @@ async function submitRestoreWithPassphrase(): Promise<void> {
       </p>
 
       <form v-else class="mt-2 space-y-2" novalidate @submit.prevent="submitPersonalData">
-        <UiTextInput v-model="personalDataForm.name" placeholder="Name" />
-        <UiTextInput v-model="personalDataForm.email" type="email" placeholder="Email" />
-        <UiTextInput v-model="personalDataForm.phone" type="tel" placeholder="Phone" />
-        <UiTextInput v-model="personalDataForm.address" placeholder="Address" />
-        <UiTextInput v-model="personalDataForm.birthDate" type="date" />
+        <p class="text-xs text-if-faint">
+          The dropdown next to each field is its own default answer for every site that asks,
+          unless a site-specific rule overrides it -- reusing the Policy Engine's existing global
+          rules (Phase 4), which never had a UI until now.
+        </p>
+
+        <div class="flex items-center gap-2">
+          <UiTextInput v-model="personalDataForm.name" placeholder="Name" class="flex-1" />
+          <select
+            :key="`name-${policySelectRenderKey}`"
+            :value="currentGlobalPolicyValue('name')"
+            :disabled="policies.saving"
+            class="rounded border border-if-hairline bg-if-white p-1.5 text-xs text-if-navy disabled:opacity-50"
+            @change="onGlobalPolicyChange('name', $event)"
+          >
+            <option v-for="option in globalPolicyOptions('name')" :key="option.value" :value="option.value">
+              {{ option.label }}
+            </option>
+          </select>
+        </div>
+
+        <div class="flex items-center gap-2">
+          <UiTextInput v-model="personalDataForm.email" type="email" placeholder="Email" class="flex-1" />
+          <select
+            :key="`email-${policySelectRenderKey}`"
+            :value="currentGlobalPolicyValue('email')"
+            :disabled="policies.saving"
+            class="rounded border border-if-hairline bg-if-white p-1.5 text-xs text-if-navy disabled:opacity-50"
+            @change="onGlobalPolicyChange('email', $event)"
+          >
+            <option v-for="option in globalPolicyOptions('email')" :key="option.value" :value="option.value">
+              {{ option.label }}
+            </option>
+          </select>
+        </div>
+
+        <div class="flex items-center gap-2">
+          <UiTextInput v-model="personalDataForm.phone" type="tel" placeholder="Phone" class="flex-1" />
+          <select
+            :key="`phone-${policySelectRenderKey}`"
+            :value="currentGlobalPolicyValue('phone')"
+            :disabled="policies.saving"
+            class="rounded border border-if-hairline bg-if-white p-1.5 text-xs text-if-navy disabled:opacity-50"
+            @change="onGlobalPolicyChange('phone', $event)"
+          >
+            <option v-for="option in globalPolicyOptions('phone')" :key="option.value" :value="option.value">
+              {{ option.label }}
+            </option>
+          </select>
+        </div>
+
+        <div class="flex items-center gap-2">
+          <UiTextInput v-model="personalDataForm.address" placeholder="Address" class="flex-1" />
+          <select
+            :key="`address-${policySelectRenderKey}`"
+            :value="currentGlobalPolicyValue('address')"
+            :disabled="policies.saving"
+            class="rounded border border-if-hairline bg-if-white p-1.5 text-xs text-if-navy disabled:opacity-50"
+            @change="onGlobalPolicyChange('address', $event)"
+          >
+            <option v-for="option in globalPolicyOptions('address')" :key="option.value" :value="option.value">
+              {{ option.label }}
+            </option>
+          </select>
+        </div>
+
+        <div class="flex items-center gap-2">
+          <UiTextInput v-model="personalDataForm.birthDate" type="date" class="flex-1" />
+          <select
+            :key="`birthDate-${policySelectRenderKey}`"
+            :value="currentGlobalPolicyValue('birthDate')"
+            :disabled="policies.saving"
+            class="rounded border border-if-hairline bg-if-white p-1.5 text-xs text-if-navy disabled:opacity-50"
+            @change="onGlobalPolicyChange('birthDate', $event)"
+          >
+            <option v-for="option in globalPolicyOptions('birthDate')" :key="option.value" :value="option.value">
+              {{ option.label }}
+            </option>
+          </select>
+        </div>
+
         <div>
-          <UiTextInput v-model="personalDataForm.nationalId" placeholder="National ID (e.g. CPF)" />
+          <div class="flex items-center gap-2">
+            <UiTextInput
+              v-model="personalDataForm.nationalId"
+              placeholder="National ID (e.g. CPF)"
+              class="flex-1"
+            />
+            <select
+              :key="`nationalId-${policySelectRenderKey}`"
+              :value="currentGlobalPolicyValue('nationalId')"
+              :disabled="policies.saving"
+              class="rounded border border-if-hairline bg-if-white p-1.5 text-xs text-if-navy disabled:opacity-50"
+              @change="onGlobalPolicyChange('nationalId', $event)"
+            >
+              <option
+                v-for="option in globalPolicyOptions('nationalId')"
+                :key="option.value"
+                :value="option.value"
+              >
+                {{ option.label }}
+              </option>
+            </select>
+          </div>
           <p class="mt-1 text-xs text-if-faint">
-            Highly sensitive -- always asked for, never filled automatically.
+            Highly sensitive -- Real or Deny only, never Alias/Synthetic/Nonsense.
           </p>
         </div>
 
@@ -318,6 +483,7 @@ async function submitRestoreWithPassphrase(): Promise<void> {
         <p v-if="personalData.saveError" class="text-xs text-red-600">
           {{ personalData.saveError }}
         </p>
+        <p v-if="policies.saveError" class="text-xs text-red-600">{{ policies.saveError }}</p>
       </form>
     </section>
 

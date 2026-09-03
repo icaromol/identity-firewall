@@ -24,7 +24,7 @@ describe('policy handlers', () => {
   });
 
   it('handleGetPolicies/handleSetPolicy/handleDeletePolicy round-trip through the message handlers', async () => {
-    expect(await handleGetPolicies({ type: 'GET_POLICIES' })).toEqual([]);
+    expect((await handleGetPolicies({ type: 'GET_POLICIES' })).policies).toEqual([]);
 
     const rule = {
       scope: { kind: 'global' as const },
@@ -33,13 +33,28 @@ describe('policy handlers', () => {
     };
     const afterSet = await handleSetPolicy({ type: 'SET_POLICY', payload: rule });
     expect(afterSet).toEqual([rule]);
-    expect(await handleGetPolicies({ type: 'GET_POLICIES' })).toEqual([rule]);
+    expect((await handleGetPolicies({ type: 'GET_POLICIES' })).policies).toEqual([rule]);
 
     const afterDelete = await handleDeletePolicy({
       type: 'DELETE_POLICY',
       payload: { scope: { kind: 'global' }, fieldType: 'phone' },
     });
     expect(afterDelete).toEqual([]);
+  });
+
+  // Phase 7 Part A M5 -- GET_POLICIES now also returns, per field, which
+  // ResponseType choices the Personal Data tab's dropdowns should offer --
+  // computed server-side (background/firewall/responseAvailability.ts),
+  // same source of truth SUBMIT_FIELD_DECISIONS already re-validates
+  // against, not a second client-side copy.
+  it('handleGetPolicies computes availableResponses per field from the (empty) PersonalData', async () => {
+    const { availableResponses } = await handleGetPolicies({ type: 'GET_POLICIES' });
+
+    // No PersonalData set and no alias provider configured in this test --
+    // 'real' and 'alias' are both excluded; nationalId (highlySensitive)
+    // never offers synthetic/nonsense at all.
+    expect(availableResponses.email).toEqual(['synthetic', 'nonsense', 'deny']);
+    expect(availableResponses.nationalId).toEqual(['deny']);
   });
 
   it('handleSetHighTrustOrigin round-trips through the message handler', async () => {
