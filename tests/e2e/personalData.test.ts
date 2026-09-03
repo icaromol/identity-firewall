@@ -83,12 +83,15 @@ test('the Personal data tab shows a graceful error while the vault is locked', a
 }) => {
   // No vault has been set up in this fresh context, so GET_PERSONAL_DATA's
   // VAULT_LOCKED rejection (readPersonalDataBlob's own guard) is exactly
-  // what this tab should surface -- not a crash, not a blank form. No
+  // what this tab should surface -- not a crash, not a blank form. Phase 7
+  // Part A's VaultLockedNotice component (components/ui/VaultLockedNotice.vue)
+  // now renders instead of the raw error string, distinguishing "never set
+  // up" (this test's exact scenario) from "locked" via its own heading. No
   // popup interaction needed for this one: the Options page fetches vault
   // status/personal data on its own mount, independent of the popup.
   const options = await context.newPage();
   await options.goto(`chrome-extension://${extensionId}/options.html`);
   await options.getByRole('button', { name: 'Personal data' }).click();
 
-  await expect(options.getByText('VAULT_LOCKED', { exact: true })).toBeVisible();
+  await expect(options.getByRole('heading', { name: 'Vault not set up' })).toBeVisible();
 });

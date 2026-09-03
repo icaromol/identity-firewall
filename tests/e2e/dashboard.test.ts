@@ -9,8 +9,10 @@
 // GET_ALL_PRIVACY_LEDGER reads the same encrypted vault index
 // GET_PERSONAL_DATA does, so on a fresh, uninitialized vault (no setup has
 // happened in this context) the ledger tab correctly shows the same
-// VAULT_LOCKED error Personal Data shows, not the "no sites yet"
-// empty-list message -- that message only appears once the vault is
+// VaultLockedNotice component Personal Data shows (its "Vault not set up"
+// branch specifically, since this context's vault was never initialized
+// at all -- see components/ui/VaultLockedNotice.vue), not the "no sites
+// yet" empty-list message -- that message only appears once the vault is
 // unlocked and genuinely has no recorded disclosures.
 
 import { readFile } from 'node:fs/promises';
@@ -26,7 +28,7 @@ test('the Options page opens with the tab strip and defaults to "Who knows what 
   await expect(
     options.getByRole('heading', { name: 'Identity Firewall — Dashboard' }),
   ).toBeVisible();
-  await expect(options.getByText('VAULT_LOCKED', { exact: true })).toBeVisible();
+  await expect(options.getByRole('heading', { name: 'Vault not set up' })).toBeVisible();
 });
 
 test('switching tabs shows the content for each panel', async ({ context, extensionId }) => {
@@ -43,10 +45,10 @@ test('switching tabs shows the content for each panel', async ({ context, extens
   ).toBeVisible();
 
   await options.getByRole('button', { name: 'Personal data' }).click();
-  await expect(options.getByText('VAULT_LOCKED', { exact: true })).toBeVisible();
+  await expect(options.getByRole('heading', { name: 'Vault not set up' })).toBeVisible();
 
   await options.getByRole('button', { name: 'Who knows what about me' }).click();
-  await expect(options.getByText('VAULT_LOCKED', { exact: true })).toBeVisible();
+  await expect(options.getByRole('heading', { name: 'Vault not set up' })).toBeVisible();
 });
 
 test('an unlocked vault with no recorded disclosures shows the ledger tab’s empty state', async ({

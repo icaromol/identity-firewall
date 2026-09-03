@@ -26,6 +26,7 @@ import UiTextInput from '../../components/ui/UiTextInput.vue';
 import UiToastHost from '../../components/ui/UiToastHost.vue';
 import UiToggle from '../../components/ui/UiToggle.vue';
 import UiTooltip from '../../components/ui/UiTooltip.vue';
+import VaultLockedNotice from '../../components/ui/VaultLockedNotice.vue';
 // biome-ignore-end lint/correctness/noUnusedImports: used in <template>
 import { isAutoLockDisabled } from '../../shared/settings';
 import type {
@@ -105,14 +106,21 @@ const restoreFile = ref<File | null>(null);
 const restoreBackupPassphrase = ref('');
 const restoreNewPassphrase = ref('');
 
-onMounted(() => {
-  allSitesLedger.fetchLedger();
-  vault.fetchStatus();
+// Both pieces the "Personal data" tab needs, refetched together --
+// initially on mount, and again from VaultLockedNotice's own @unlocked
+// event once the tab is reachable through that path too.
+function fetchPersonalDataTab(): void {
   personalData.fetchPersonalData().then(() => {
     if (personalData.status === 'loaded') Object.assign(personalDataForm, personalData.data);
   });
-  appSettings.fetchAppSettings();
   policies.fetchPolicies();
+}
+
+onMounted(() => {
+  allSitesLedger.fetchLedger();
+  vault.fetchStatus();
+  fetchPersonalDataTab();
+  appSettings.fetchAppSettings();
 });
 
 // Auto-lock is a <select>, not a UiToggle (unlike credentialSaveMode
@@ -306,19 +314,42 @@ async function submitRestoreWithPassphrase(): Promise<void> {
     </nav>
 
     <!-- v-if, not v-show, for all three panels below -- with v-show every
-         tab stays mounted (just CSS-hidden), so an error string like
-         "VAULT_LOCKED" can appear in more than one panel's DOM at once
-         (e.g. this ledger tab and the Personal Data tab both hit the same
-         VaultLockedError on a fresh vault) -- harmless in the real UI, but
-         it made Playwright's getByText resolve to two elements and fail
-         strict mode (found writing tests/e2e/dashboard.test.ts). v-if is
+         tab stays mounted (just CSS-hidden), so the same content (e.g. the
+         "VAULT_LOCKED" error, or now VaultLockedNotice's own heading) can
+         appear in more than one panel's DOM at once (this ledger tab and
+         the Personal Data tab both hit the same VaultLockedError on a
+         fresh vault) -- harmless in the real UI, but it made Playwright's
+         getByText resolve to two elements and fail strict mode (found
+         writing tests/e2e/dashboard.test.ts). v-if is
          safe here since every ref/reactive this template binds to lives in
          this component's own setup(), not inside the panel itself, so
          switching tabs away and back never loses any state. -->
-    <section v-if="activeTab === 'ledger'" class="mt-6 max-w-2xl">
+    <section
+      v-if="activeTab === 'ledger'"
+      class="mt-6"
+      :class="
+        allSitesLedger.status === 'error' && allSitesLedger.error === 'VAULT_LOCKED'
+          ? 'max-w-md'
+          : 'max-w-2xl'
+      "
+    >
       <p v-if="allSitesLedger.status === 'idle' || allSitesLedger.status === 'loading'" class="flex items-center gap-2 text-if-muted">
         <UiSpinner size="sm" /> Loading…
       </p>
+
+      <!-- max-w-md here, not this tab's normal max-w-2xl (see the
+           <section>'s own :class above) -- every OTHER tab that can show
+           VaultLockedNotice (Personal data, Backup & recovery,
+           Configuration) is already max-w-md, so without this override
+           the notice would visibly land in a different horizontal
+           position on this tab alone, purely because its own mx-auto
+           centers within whatever width its parent section happens to
+           have. -->
+      <VaultLockedNotice
+        v-else-if="allSitesLedger.status === 'error' && allSitesLedger.error === 'VAULT_LOCKED'"
+        description="Site disclosure history is stored in your encrypted vault."
+        @unlocked="allSitesLedger.fetchLedger()"
+      />
 
       <p v-else-if="allSitesLedger.status === 'error'" class="text-red-600">
         {{ allSitesLedger.error }}
@@ -364,6 +395,12 @@ async function submitRestoreWithPassphrase(): Promise<void> {
       >
         <UiSpinner size="sm" /> Loading…
       </p>
+
+      <VaultLockedNotice
+        v-else-if="personalData.status === 'error' && personalData.error === 'VAULT_LOCKED'"
+        description="Personal data is stored in your encrypted vault."
+        @unlocked="fetchPersonalDataTab()"
+      />
 
       <p v-else-if="personalData.status === 'error'" class="mt-2 text-red-600">
         {{ personalData.error }}

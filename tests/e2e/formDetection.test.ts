@@ -44,6 +44,18 @@ test('popup shows detected forms, accumulating across origins as the user naviga
     const popup = await context.newPage();
     await popup.goto(`chrome-extension://${extensionId}/popup.html`);
 
+    // Phase 7 Part A -- "Sites detected this session" is now gated behind
+    // vaultReady (a genuinely minimal "blocked mode" while locked), even
+    // though the underlying session/form-detection state itself has never
+    // depended on the vault. Unlock once here; the cached unlock key lives
+    // in browser.storage.session, so it survives this test's later
+    // popup.reload() calls without needing to unlock again.
+    await popup
+      .getByPlaceholder('Or choose a passphrase instead')
+      .fill('correct horse battery staple');
+    await popup.getByRole('button', { name: 'Set up with Passphrase' }).click();
+    await expect(popup.getByRole('button', { name: 'Lock vault' })).toBeVisible();
+
     await expect(popup.getByText(originA, { exact: true })).toBeVisible();
     await expect(popup.getByText('1 form(s)', { exact: true })).toBeVisible();
 

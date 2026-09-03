@@ -41,12 +41,14 @@ import {
   LockOpen,
   Save,
   ScrollText,
+  Settings,
   Shield,
   ShieldBan,
   TriangleAlert,
   X,
 } from '@lucide/vue';
 import { computed, onMounted, ref } from 'vue';
+import { browser } from 'wxt/browser';
 import UiButton from '../../components/ui/UiButton.vue';
 import UiSection from '../../components/ui/UiSection.vue';
 import UiSpinner from '../../components/ui/UiSpinner.vue';
@@ -114,6 +116,22 @@ const vaultStatusIcon = computed(() => {
   if (!vault.initialized) return KeyRound;
   return vault.locked ? Lock : LockOpen;
 });
+
+// "Blocked mode" -- while the vault is anything other than genuinely set
+// up and unlocked, the popup shows ONLY the header and the Vault card
+// (setup/unlock). Every site-scoped section below (Pending request,
+// Saved logins, Privacy ledger, Sites detected this session) is gated on
+// this, even "Sites detected this session," which doesn't actually
+// depend on the vault at all -- a deliberate choice, confirmed with the
+// user, favoring a genuinely minimal locked screen over keeping that one
+// section independently visible.
+// biome-ignore lint/correctness/noUnusedVariables: read from <template> -- Biome only lints the <script> block, it can't see template usage.
+const vaultReady = computed(() => vault.status !== 'idle' && vault.initialized && !vault.locked);
+
+// biome-ignore lint/correctness/noUnusedVariables: called from @click in <template> -- Biome only lints the <script> block, it can't see template usage.
+function clickOpenOptions(): void {
+  browser.runtime.openOptionsPage();
+}
 
 const setupPassphrase = ref('');
 const unlockPassphrase = ref('');
@@ -317,18 +335,31 @@ async function submitUnlockPassphrase() {
       <h1 class="flex items-center gap-1.5 font-heading text-base font-bold text-if-navy">
         <Shield class="h-4 w-4" aria-hidden="true" /> Identity Firewall
       </h1>
-      <UiTooltip v-if="vaultStatusIcon" v-slot="{ id }" :text="vaultIconLabel" align="end">
-        <button
-          type="button"
-          class="rounded p-1 text-if-muted enabled:hover:text-if-navy disabled:cursor-default"
-          :disabled="vaultIconAction === null || vault.status === 'loading'"
-          :aria-label="vaultIconLabel"
-          :aria-describedby="id"
-          @click="clickVaultIcon()"
-        >
-          <component :is="vaultStatusIcon" class="h-4 w-4" aria-hidden="true" />
-        </button>
-      </UiTooltip>
+      <div class="flex items-center gap-1">
+        <UiTooltip v-slot="{ id }" text="Open Dashboard" align="end">
+          <button
+            type="button"
+            class="rounded p-1 text-if-muted enabled:hover:text-if-navy"
+            aria-label="Open Dashboard"
+            :aria-describedby="id"
+            @click="clickOpenOptions()"
+          >
+            <Settings class="h-4 w-4" aria-hidden="true" />
+          </button>
+        </UiTooltip>
+        <UiTooltip v-if="vaultStatusIcon" v-slot="{ id }" :text="vaultIconLabel" align="end">
+          <button
+            type="button"
+            class="rounded p-1 text-if-muted enabled:hover:text-if-navy disabled:cursor-default"
+            :disabled="vaultIconAction === null || vault.status === 'loading'"
+            :aria-label="vaultIconLabel"
+            :aria-describedby="id"
+            @click="clickVaultIcon()"
+          >
+            <component :is="vaultStatusIcon" class="h-4 w-4" aria-hidden="true" />
+          </button>
+        </UiTooltip>
+      </div>
     </div>
 
     <!-- Hidden once fully unlocked, per the user's own request -- once the
@@ -350,11 +381,6 @@ async function submitUnlockPassphrase() {
       :icon="Key"
       :divider="false"
     >
-      <p class="mt-1 text-xs text-if-faint">
-        Personal data and backup/recovery have moved to the extension's Dashboard page
-        (right-click the extension icon → Options).
-      </p>
-
       <p v-if="vault.status === 'error'" class="mt-2 text-red-600">{{ vault.error }}</p>
 
       <!-- 'idle' (fetchStatus hasn't resolved yet) gets its own branch --
@@ -374,10 +400,6 @@ async function submitUnlockPassphrase() {
         <UiButton :loading="vault.status === 'loading'" @click="clickSetupWithPasskey()">
           Set up with Passkey (recommended)
         </UiButton>
-        <p class="text-xs text-if-faint">
-          Uses your device's biometric or security key. Recommended over a passphrase -- see
-          ADR-012.
-        </p>
 
         <form class="space-y-2" @submit.prevent="submitSetupPassphrase">
           <UiTextInput
@@ -442,20 +464,25 @@ async function submitUnlockPassphrase() {
 
     </UiSection>
 
-    <!-- The site every section below is scoped to, shown once here rather
-         than repeated in each of their own titles. -->
-    <p v-if="currentOrigin" class="mt-4 truncate text-xs text-if-faint">
-      {{ currentOrigin }}
-    </p>
+    <!-- Blocked mode: nothing below this point exists in the DOM at all
+         until vaultReady -- see that computed's own comment for why this
+         includes "Sites detected this session" too, even though it isn't
+         actually vault-scoped data. -->
+    <template v-if="vaultReady">
+      <!-- The site every section below is scoped to, shown once here rather
+           than repeated in each of their own titles. -->
+      <p v-if="currentOrigin" class="mt-4 truncate text-xs text-if-faint">
+        {{ currentOrigin }}
+      </p>
 
-    <!-- The header icon already gives an at-a-glance lock state; the four
-         sections below are about a SPECIFIC SITE, so none of them are
-         meaningful until the vault actually holds something to disclose.
-         'VAULT_LOCKED' is specifically softened here (a muted note, not a
-         red error) since it's an expected, common state, not a failure --
-         any OTHER error (e.g. the tab-resolution failure
-         tests/e2e/firewallApproval.test.ts exercises) still renders in the
-         normal red-error style below, unchanged. -->
+    <!-- These four sections are about a SPECIFIC SITE, so none of them are
+         meaningful until the vault actually holds something to disclose --
+         and now that they're only ever mounted at all once vaultReady is
+         true (the <template> wrapper above), a VAULT_LOCKED error can no
+         longer occur here at all; each section's own error branch only
+         ever needs to handle a genuinely different failure (e.g. the
+         tab-resolution failure tests/e2e/firewallApproval.test.ts
+         exercises, reproducible once unlocked). -->
     <UiSection
       title="Pending request"
       :icon="Bell"
@@ -504,13 +531,6 @@ async function submitUnlockPassphrase() {
         class="mt-2 flex items-center gap-2 text-if-muted"
       >
         <UiSpinner size="sm" /> Loading…
-      </p>
-
-      <p
-        v-else-if="firewall.status === 'error' && firewall.error === 'VAULT_LOCKED'"
-        class="mt-2 text-if-faint"
-      >
-        Set up your vault above to see this.
       </p>
 
       <p v-else-if="firewall.status === 'error'" class="mt-2 text-red-600">
@@ -645,13 +665,6 @@ async function submitUnlockPassphrase() {
         <UiSpinner size="sm" /> Loading…
       </p>
 
-      <p
-        v-else-if="savedCredentials.status === 'error' && savedCredentials.error === 'VAULT_LOCKED'"
-        class="mt-2 text-if-faint"
-      >
-        Set up your vault above to see this.
-      </p>
-
       <p v-else-if="savedCredentials.status === 'error'" class="mt-2 text-red-600">
         {{ savedCredentials.error }}
       </p>
@@ -700,13 +713,6 @@ async function submitUnlockPassphrase() {
         class="mt-2 flex items-center gap-2 text-if-muted"
       >
         <UiSpinner size="sm" /> Loading…
-      </p>
-
-      <p
-        v-else-if="privacyLedger.status === 'error' && privacyLedger.error === 'VAULT_LOCKED'"
-        class="mt-2 text-if-faint"
-      >
-        Set up your vault above to see this.
       </p>
 
       <p v-else-if="privacyLedger.status === 'error'" class="mt-2 text-red-600">
@@ -767,5 +773,6 @@ async function submitUnlockPassphrase() {
 
       <p v-else class="mt-2 text-if-muted">No forms detected yet this session.</p>
     </UiSection>
+    </template>
   </main>
 </template>
