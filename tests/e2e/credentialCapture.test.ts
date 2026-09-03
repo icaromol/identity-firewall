@@ -127,6 +127,74 @@ test('AUTOFILL_FIELDS replies with whether it actually wrote anything (Phase 5 M
   expect(notApplied).toBe(false);
 });
 
+// Phase 7 Part A M4 -- with credentialSaveMode: 'auto', the same real
+// submit pipeline above should skip staging entirely and save straight to
+// the vault, with a one-time notice the popup can pick up.
+test('with credentialSaveMode "auto", a real form submit saves straight to the vault', async ({
+  context,
+  extensionId,
+}) => {
+  const popup = await context.newPage();
+  await popup.goto(`chrome-extension://${extensionId}/popup.html`);
+  await popup
+    .getByPlaceholder('Or choose a passphrase instead')
+    .fill('correct horse battery staple');
+  await popup.getByRole('button', { name: 'Set up with Passphrase' }).click();
+  await expect(popup.getByRole('button', { name: 'Lock vault' })).toBeVisible();
+
+  const setSettings = await popup.evaluate(() =>
+    chrome.runtime.sendMessage({
+      type: 'SET_APP_SETTINGS',
+      payload: { credentialSaveMode: 'auto' },
+    }),
+  );
+  expect(setSettings).toMatchObject({ ok: true });
+
+  const page = await context.newPage();
+  await page.goto(site.origin);
+  await page.locator('input[type=email]').fill('bob@example.com');
+  await page.locator('input[type=password]').fill('correcthorse');
+  await page.evaluate(() => document.querySelector('form')?.requestSubmit());
+
+  await expect
+    .poll(async () =>
+      popup.evaluate(
+        (origin) =>
+          chrome.runtime.sendMessage<Array<{ username: string | null; password: string }>>({
+            type: 'GET_CREDENTIAL',
+            payload: { origin },
+          }),
+        site.origin,
+      ),
+    )
+    .toMatchObject({
+      ok: true,
+      data: [{ kind: 'password', username: 'bob@example.com', password: 'correcthorse' }],
+    });
+
+  // Nothing staged -- the whole point of 'auto' is that the "Save this
+  // login?" prompt never appears.
+  const pending = await popup.evaluate(
+    (origin) => chrome.runtime.sendMessage({ type: 'GET_PENDING_CREDENTIAL', payload: { origin } }),
+    site.origin,
+  );
+  expect(pending).toMatchObject({ ok: true, data: null });
+
+  // The one-time confirmation the popup can show in place of a live toast
+  // (see stores/pendingCredential.store.ts's checkAutoSaveNotice) -- taken
+  // once, then gone.
+  const notice = await popup.evaluate(
+    (origin) => chrome.runtime.sendMessage({ type: 'TAKE_AUTO_SAVE_NOTICE', payload: { origin } }),
+    site.origin,
+  );
+  expect(notice).toMatchObject({ ok: true, data: true });
+  const noticeAgain = await popup.evaluate(
+    (origin) => chrome.runtime.sendMessage({ type: 'TAKE_AUTO_SAVE_NOTICE', payload: { origin } }),
+    site.origin,
+  );
+  expect(noticeAgain).toMatchObject({ ok: true, data: false });
+});
+
 test('a form submit with no password field is never captured', async ({ context, extensionId }) => {
   const server = await startFixtureServer();
   try {

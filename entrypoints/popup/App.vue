@@ -132,6 +132,14 @@ function refreshVaultScopedSections(): void {
   privacyLedger.fetchLedger();
   pendingCredential.fetchPendingCredential();
   savedCredentials.fetchCredentials();
+
+  // credentialSaveMode: 'auto' never stages a PendingCredential, so
+  // there's nothing for pendingCredential.fetchPendingCredential() above
+  // to surface -- this is the only remaining confirmation an auto-save
+  // gets (docs/plans/autolock-and-configuration.md decision 5).
+  pendingCredential.checkAutoSaveNotice().then((wasAutoSaved) => {
+    if (wasAutoSaved) toast.push('Login saved automatically.', 'success');
+  });
 }
 
 onMounted(() => {

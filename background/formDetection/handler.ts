@@ -13,7 +13,11 @@ import { detectLoginForm } from '../firewall/loginDetector';
 import { computeAutoApply } from '../policy/autoApply';
 import { recordDisclosure } from '../policy/ledger';
 import { recordFormDetection } from '../session/state';
+import { getAppSettings } from '../settings/storage';
+import { setAutoSaveNotice } from '../vault/credentials/autoSaveNotice';
 import { setPendingCredential } from '../vault/credentials/pendingCapture';
+import { saveCredential } from '../vault/credentials/storage';
+import { VaultLockedError } from '../vault/storage';
 
 // Typed inline as the sender shape itself, not imported from
 // router/registry.ts's HandlerContext -- that would make this leaf
@@ -92,6 +96,16 @@ export async function handleFormDetected(
 // half of the submitted fields (value stripped) rather than trusting a
 // content-script-side classification -- the same content-extracts/
 // background-interprets boundary handleFormDetected already keeps.
+//
+// Phase 7 Part A M4 -- credentialSaveMode: 'auto' skips staging entirely
+// and writes straight to the vault via the same saveCredential()
+// CONFIRM_PENDING_CREDENTIAL already uses, so the popup's "Save this
+// login?" prompt never appears in this mode. Falls back to the normal
+// staging path if the vault happens to be locked at submit time --
+// saveCredential needs the decrypted RootSecret to derive the site key,
+// which a locked vault can't provide; staging (chrome.storage.session,
+// no decryption needed) still gives the user a chance to save it once
+// they unlock, rather than silently dropping the capture.
 export async function handleFormSubmitted(
   message: FormSubmittedMessage,
   ctx: { sender: Browser.runtime.MessageSender },
@@ -115,15 +129,32 @@ export async function handleFormSubmitted(
 
   const identifierField =
     detected.identifierFieldIndex !== null ? fields[detected.identifierFieldIndex] : undefined;
+  const identifier = identifierField?.value ?? null;
 
   const normalizedOrigin = normalizeOrigin(origin);
+  const tabId = ctx.sender.tab?.id;
+
+  const settings = await getAppSettings();
+  if (settings.credentialSaveMode === 'auto') {
+    try {
+      await saveCredential(normalizedOrigin, { kind: 'password', username: identifier, password });
+      await setAutoSaveNotice(normalizedOrigin);
+      if (tabId !== undefined) {
+        await updateBadgeForTab(tabId, origin);
+      }
+      return { captured: true };
+    } catch (err) {
+      if (!(err instanceof VaultLockedError)) throw err;
+      // Vault locked -- fall through to staging below, same as 'ask' mode.
+    }
+  }
+
   await setPendingCredential(normalizedOrigin, {
-    identifier: identifierField?.value ?? null,
+    identifier,
     password,
     capturedAt: Date.now(),
   });
 
-  const tabId = ctx.sender.tab?.id;
   if (tabId !== undefined) {
     await updateBadgeForTab(tabId, origin);
   }

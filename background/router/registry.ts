@@ -31,6 +31,7 @@ import {
   handleGetCredential,
   handleGetPendingCredential,
   handleSaveCredential,
+  handleTakeAutoSaveNotice,
 } from '../vault/credentials/handler';
 import {
   handleCreateRootIdentity,
@@ -150,6 +151,10 @@ export const registry: Registry = {
   DISCARD_PENDING_CREDENTIAL: {
     capability: 'vault',
     handle: (message) => handleDiscardPendingCredential(message),
+  },
+  TAKE_AUTO_SAVE_NOTICE: {
+    capability: 'vault',
+    handle: (message) => handleTakeAutoSaveNotice(message),
   },
   FILL_CREDENTIAL: {
     capability: 'vault',

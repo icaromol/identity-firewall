@@ -118,4 +118,40 @@ describe('usePendingCredentialStore', () => {
     });
     expect(store.pending).toBeNull();
   });
+
+  describe('checkAutoSaveNotice (Phase 7 Part A M4)', () => {
+    it('sends TAKE_AUTO_SAVE_NOTICE for the active tab origin and returns the result', async () => {
+      mockActiveTab();
+      const sendMessageSpy = vi
+        .spyOn(fakeBrowser.runtime, 'sendMessage')
+        .mockResolvedValueOnce({ ok: true, data: true } as never);
+
+      const store = usePendingCredentialStore();
+      const result = await store.checkAutoSaveNotice();
+
+      expect(sendMessageSpy).toHaveBeenCalledWith({
+        type: 'TAKE_AUTO_SAVE_NOTICE',
+        payload: { origin: 'https://example.com' },
+      });
+      expect(result).toBe(true);
+    });
+
+    it('returns false, not a thrown error, when there is no active tab', async () => {
+      vi.spyOn(fakeBrowser.tabs, 'query').mockResolvedValueOnce([] as never);
+
+      const store = usePendingCredentialStore();
+      expect(await store.checkAutoSaveNotice()).toBe(false);
+    });
+
+    it('returns false on a handler-level failure', async () => {
+      mockActiveTab();
+      vi.spyOn(fakeBrowser.runtime, 'sendMessage').mockResolvedValueOnce({
+        ok: false,
+        error: 'boom',
+      } as never);
+
+      const store = usePendingCredentialStore();
+      expect(await store.checkAutoSaveNotice()).toBe(false);
+    });
+  });
 });

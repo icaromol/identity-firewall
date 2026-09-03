@@ -458,8 +458,8 @@ async function submitRestoreWithPassphrase(): Promise<void> {
             </UiToggle>
           </div>
           <p class="mt-1 text-xs text-if-faint">
-            Off (default): a "Save this login?" prompt appears every time. On: your preference is
-            saved now, but new logins still ask until auto-save is wired up (coming next).
+            Off (default): a "Save this login?" prompt appears every time. On: saved to your local
+            vault immediately, with a confirmation the next time you open the extension icon.
           </p>
         </div>
 

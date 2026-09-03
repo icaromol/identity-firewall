@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fakeBrowser } from 'wxt/testing/fake-browser';
 import { recordFormDetection } from '../../../../../background/session/state';
+import { setAutoSaveNotice } from '../../../../../background/vault/credentials/autoSaveNotice';
 import {
   handleConfirmPendingCredential,
   handleDeleteCredential,
@@ -9,6 +10,7 @@ import {
   handleGetCredential,
   handleGetPendingCredential,
   handleSaveCredential,
+  handleTakeAutoSaveNotice,
 } from '../../../../../background/vault/credentials/handler';
 import { setPendingCredential } from '../../../../../background/vault/credentials/pendingCapture';
 import { createRootIdentity } from '../../../../../background/vault/setup';
@@ -20,6 +22,7 @@ import type {
   GetCredentialMessage,
   GetPendingCredentialMessage,
   SaveCredentialMessage,
+  TakeAutoSaveNoticeMessage,
   UnlockInput,
 } from '../../../../../shared/messages';
 import { normalizeOrigin } from '../../../../../shared/origin';
@@ -220,6 +223,17 @@ describe('pending credential handlers (Phase 5 M4)', () => {
       payload: { origin: 'https://example.com' },
     };
     expect(await handleGetCredential(getMessage)).toEqual([]);
+  });
+
+  it('handleTakeAutoSaveNotice returns and clears a set notice, once', async () => {
+    await setAutoSaveNotice(normalizeOrigin('https://example.com'));
+
+    const message: TakeAutoSaveNoticeMessage = {
+      type: 'TAKE_AUTO_SAVE_NOTICE',
+      payload: { origin: 'https://example.com' },
+    };
+    expect(await handleTakeAutoSaveNotice(message)).toBe(true);
+    expect(await handleTakeAutoSaveNotice(message)).toBe(false);
   });
 });
 

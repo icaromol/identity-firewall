@@ -6,7 +6,10 @@ import {
 } from '../../../../background/formDetection/handler';
 import { setHighTrustOrigin, setPolicy } from '../../../../background/policy/storage';
 import { getSessionState } from '../../../../background/session/state';
+import { setAppSettings } from '../../../../background/settings/storage';
+import { takeAutoSaveNotice } from '../../../../background/vault/credentials/autoSaveNotice';
 import { getPendingCredential } from '../../../../background/vault/credentials/pendingCapture';
+import { getCredentials } from '../../../../background/vault/credentials/storage';
 import { setPersonalData } from '../../../../background/vault/personalData/storage';
 import { createRootIdentity } from '../../../../background/vault/setup';
 import { readVaultIndex } from '../../../../background/vault/storage';
@@ -390,5 +393,87 @@ describe('handleFormSubmitted (Phase 5 M4)', () => {
       identifier: null,
       password: 'hunter2',
     });
+  });
+});
+
+describe('handleFormSubmitted -- credentialSaveMode: "auto" (Phase 7 Part A M4)', () => {
+  // Reuses the module-level passphraseInput (declared at the top of this
+  // file for handleFormDetected's own automation-path tests).
+  function loginSubmission(
+    overrides: Partial<FormSubmittedMessage['payload']> = {},
+  ): FormSubmittedMessage {
+    return {
+      type: 'FORM_SUBMITTED',
+      payload: {
+        origin: 'https://example.com',
+        formIndex: 0,
+        fields: [
+          {
+            tagName: 'input',
+            type: 'email',
+            name: 'email',
+            id: null,
+            required: true,
+            autocomplete: 'username',
+            value: 'alice@example.com',
+          },
+          {
+            tagName: 'input',
+            type: 'password',
+            name: 'password',
+            id: null,
+            required: true,
+            autocomplete: 'current-password',
+            value: 'hunter2',
+          },
+        ],
+        ...overrides,
+      },
+    };
+  }
+
+  beforeEach(() => {
+    fakeBrowser.reset();
+  });
+
+  it('saves straight to the vault and skips staging when the vault is unlocked', async () => {
+    await createRootIdentity(passphraseInput);
+    await setAppSettings({ credentialSaveMode: 'auto' });
+
+    const result = await handleFormSubmitted(loginSubmission(), { sender: {} });
+
+    expect(result).toEqual({ captured: true });
+    expect(await getPendingCredential(normalizeOrigin('https://example.com'))).toBeNull();
+    expect(await getCredentials(normalizeOrigin('https://example.com'))).toEqual([
+      { kind: 'password', username: 'alice@example.com', password: 'hunter2' },
+    ]);
+  });
+
+  it('sets an auto-save notice the popup can take once', async () => {
+    await createRootIdentity(passphraseInput);
+    await setAppSettings({ credentialSaveMode: 'auto' });
+
+    await handleFormSubmitted(loginSubmission(), { sender: {} });
+
+    const origin = normalizeOrigin('https://example.com');
+    expect(await takeAutoSaveNotice(origin)).toBe(true);
+    // Get-and-clear: a second read finds nothing left to take.
+    expect(await takeAutoSaveNotice(origin)).toBe(false);
+  });
+
+  it('falls back to staging (not auto-saving) when the vault is locked', async () => {
+    // No createRootIdentity call at all in this test -- the vault is not
+    // just locked but never initialized, the strictest form of "can't
+    // decrypt anything right now."
+    await setAppSettings({ credentialSaveMode: 'auto' });
+
+    const result = await handleFormSubmitted(loginSubmission(), { sender: {} });
+
+    expect(result).toEqual({ captured: true });
+    expect(await getPendingCredential(normalizeOrigin('https://example.com'))).toMatchObject({
+      identifier: 'alice@example.com',
+      password: 'hunter2',
+    });
+    expect(await takeAutoSaveNotice(normalizeOrigin('https://example.com'))).toBe(false);
   });
 });

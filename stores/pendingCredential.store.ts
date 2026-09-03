@@ -11,6 +11,7 @@ import type {
   GetPendingCredentialMessage,
   MessageResponse,
   PendingCredential,
+  TakeAutoSaveNoticeMessage,
 } from '../shared/messages';
 import type { CredentialRecord } from '../shared/vault-schema';
 import { resolveActiveTab } from './shared/activeTab';
@@ -116,6 +117,26 @@ export const usePendingCredentialStore = defineStore('pendingCredential', {
         this.actionError = err instanceof Error ? err.message : String(err);
       } finally {
         this.discarding = false;
+      }
+    },
+
+    // Phase 7 Part A M4 -- best-effort only: whether a credential was just
+    // auto-saved for the active tab's origin, get-and-clear so it's never
+    // shown twice. Returns false (never throws) on any failure -- this is
+    // a one-time confirmation, not something anything else depends on, so
+    // a failed tab-resolution or message round trip should just mean no
+    // toast, not a reported error.
+    async checkAutoSaveNotice(): Promise<boolean> {
+      try {
+        const { origin } = await resolveActiveTab();
+        const message: TakeAutoSaveNoticeMessage = {
+          type: 'TAKE_AUTO_SAVE_NOTICE',
+          payload: { origin },
+        };
+        const response: MessageResponse<boolean> = await browser.runtime.sendMessage(message);
+        return response.ok && response.data;
+      } catch {
+        return false;
       }
     },
   },

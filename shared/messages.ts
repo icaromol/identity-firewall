@@ -382,6 +382,19 @@ export const DiscardPendingCredentialMessageSchema = z.object({
 });
 export type DiscardPendingCredentialMessage = z.infer<typeof DiscardPendingCredentialMessageSchema>;
 
+// Phase 7 Part A M4 -- credentialSaveMode: 'auto' skips the pending-
+// credential prompt entirely and writes straight to the vault, so there's
+// no PendingCredential left for the popup to show a "Save this login?"
+// prompt for. This is the closest thing to a confirmation the popup can
+// still surface: a one-time, get-and-clear flag (background/vault/
+// credentials/autoSaveNotice.ts) set when an auto-save actually happens,
+// consumed (and never shown again) the first time the popup asks for it.
+export const TakeAutoSaveNoticeMessageSchema = z.object({
+  type: z.literal('TAKE_AUTO_SAVE_NOTICE'),
+  payload: z.object({ origin: z.string() }),
+});
+export type TakeAutoSaveNoticeMessage = z.infer<typeof TakeAutoSaveNoticeMessageSchema>;
+
 // --- Popup -> Background: secure export / local backup ---
 // Argon2ParamsSchema itself lives in vault-schema.ts (M2) -- also read/
 // written unencrypted via background/vault/storage.ts's
@@ -445,6 +458,7 @@ export const ExtensionMessageSchema = z.discriminatedUnion('type', [
   GetPendingCredentialMessageSchema,
   ConfirmPendingCredentialMessageSchema,
   DiscardPendingCredentialMessageSchema,
+  TakeAutoSaveNoticeMessageSchema,
   ExportVaultBackupMessageSchema,
   RestoreVaultBackupMessageSchema,
 ]);
@@ -600,6 +614,7 @@ export interface FillCredentialResponse {
 }
 export type ConfirmPendingCredentialResponse = CredentialRecord;
 export type DiscardPendingCredentialResponse = undefined;
+export type TakeAutoSaveNoticeResponse = boolean;
 
 // EXPORT_VAULT_BACKUP/RESTORE_VAULT_BACKUP's response payload shapes
 // (background/vault/handler.ts), same direct-alias convention as above (M7).

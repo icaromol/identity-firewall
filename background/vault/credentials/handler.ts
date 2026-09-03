@@ -16,12 +16,15 @@ import type {
   GetPendingCredentialResponse,
   SaveCredentialMessage,
   SaveCredentialResponse,
+  TakeAutoSaveNoticeMessage,
+  TakeAutoSaveNoticeResponse,
 } from '../../../shared/messages';
 import { normalizeOrigin } from '../../../shared/origin';
 import { updateBadgeForTab } from '../../badge';
 import { detectLoginForm } from '../../firewall/loginDetector';
 import { getSessionState } from '../../session/state';
 import { assertTabShowsOrigin } from '../../tabOriginGuard';
+import { takeAutoSaveNotice } from './autoSaveNotice';
 import { clearPendingCredential, getPendingCredential } from './pendingCapture';
 import { deleteCredential, getCredentials, saveCredential } from './storage';
 
@@ -82,6 +85,12 @@ export async function handleDiscardPendingCredential(
   const { origin, tabId } = message.payload;
   await clearPendingCredential(normalizeOrigin(origin));
   await updateBadgeForTab(tabId, origin);
+}
+
+export async function handleTakeAutoSaveNotice(
+  message: TakeAutoSaveNoticeMessage,
+): Promise<TakeAutoSaveNoticeResponse> {
+  return takeAutoSaveNotice(normalizeOrigin(message.payload.origin));
 }
 
 // Phase 5 M5 -- reuses AUTOFILL_FIELDS (content/autofill.ts's existing
