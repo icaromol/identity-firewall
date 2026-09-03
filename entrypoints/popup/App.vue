@@ -339,7 +339,7 @@ async function submitUnlockPassphrase() {
         <UiTooltip v-slot="{ id }" text="Open Dashboard" align="end">
           <button
             type="button"
-            class="rounded p-1 text-if-muted enabled:hover:text-if-navy"
+            class="cursor-pointer rounded p-1 text-if-muted enabled:hover:text-if-blue"
             aria-label="Open Dashboard"
             :aria-describedby="id"
             @click="clickOpenOptions()"
@@ -350,7 +350,7 @@ async function submitUnlockPassphrase() {
         <UiTooltip v-if="vaultStatusIcon" v-slot="{ id }" :text="vaultIconLabel" align="end">
           <button
             type="button"
-            class="rounded p-1 text-if-muted enabled:hover:text-if-navy disabled:cursor-default"
+            class="rounded p-1 text-if-muted enabled:cursor-pointer enabled:hover:text-if-blue disabled:cursor-default"
             :disabled="vaultIconAction === null || vault.status === 'loading'"
             :aria-label="vaultIconLabel"
             :aria-describedby="id"
