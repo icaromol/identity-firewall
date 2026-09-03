@@ -117,6 +117,30 @@ const vaultStatusIcon = computed(() => {
   return vault.locked ? Lock : LockOpen;
 });
 
+// import.meta.env.BROWSER is a WXT build-time constant resolved per the
+// `-b`/`--browser` target (e.g. `pnpm dev:firefox`), not a runtime
+// user-agent sniff -- verified against WXT's own config typings
+// (targetBrowsers narrows this to a string-literal union). WebAuthn from
+// a Firefox extension popup throws "The operation is insecure" --
+// confirmed via manual testing, a live Firefox bug closes the popup the
+// instant a WebAuthn prompt would appear (see createPasskeyUnlockInput's
+// own header comment in stores/vault.store.ts) -- so every passkey
+// button here is disabled, with a tooltip explaining why, rather than
+// letting the user hit that opaque browser error.
+const isFirefox = import.meta.env.BROWSER === 'firefox';
+
+// Whether a passkey unlock is CONFIGURED for this vault (or the method is
+// still unknown, e.g. before setup has happened) -- independent of
+// whether passkeys actually work in this browser at all. The passkey
+// button additionally requires passkeyCredentialId to actually be present
+// (not just configuredUnlockMethod === 'passkey') -- defense in depth
+// against the case where that pairing was ever only partially persisted.
+const passkeyConfigured = computed(
+  () =>
+    vault.configuredUnlockMethod === undefined ||
+    (vault.configuredUnlockMethod === 'passkey' && vault.passkeyCredentialId !== undefined),
+);
+
 // "Blocked mode" -- while the vault is anything other than genuinely set
 // up and unlocked, the popup shows ONLY the header and the Vault card
 // (setup/unlock). Every site-scoped section below (Pending request,
@@ -289,10 +313,7 @@ type VaultIconAction = 'lock' | 'unlockWithPasskey' | null;
 const vaultIconAction = computed<VaultIconAction>(() => {
   if (vault.status !== 'loaded' || !vault.initialized) return null;
   if (!vault.locked) return 'lock';
-  const passkeyUsable =
-    vault.configuredUnlockMethod === undefined ||
-    (vault.configuredUnlockMethod === 'passkey' && vault.passkeyCredentialId);
-  return passkeyUsable ? 'unlockWithPasskey' : null;
+  return passkeyConfigured.value && !isFirefox ? 'unlockWithPasskey' : null;
 });
 
 // biome-ignore lint/correctness/noUnusedVariables: read from <template> -- Biome only lints the <script> block, it can't see template usage.
@@ -397,7 +418,14 @@ async function submitUnlockPassphrase() {
       <div v-else-if="!vault.initialized" class="mt-2 space-y-3">
         <p class="text-if-muted">Set up your vault to get started.</p>
 
-        <UiButton :loading="vault.status === 'loading'" @click="clickSetupWithPasskey()">
+        <UiTooltip
+          v-if="isFirefox"
+          v-slot="{ id }"
+          text="Passkeys aren't supported in Firefox extensions yet -- use the passphrase option below."
+        >
+          <UiButton disabled :aria-describedby="id">Set up with Passkey (recommended)</UiButton>
+        </UiTooltip>
+        <UiButton v-else :loading="vault.status === 'loading'" @click="clickSetupWithPasskey()">
           Set up with Passkey (recommended)
         </UiButton>
 
@@ -419,22 +447,24 @@ async function submitUnlockPassphrase() {
       </div>
 
       <!-- Initialized but locked: unlock form, keyed off which method this
-           vault was actually configured with. undefined -> show both,
-           graceful degradation rather than an error. The passkey button
-           additionally requires passkeyCredentialId to actually be present
-           (not just configuredUnlockMethod === 'passkey') -- defense in
-           depth against the case where that pairing was ever only
-           partially persisted; the passphrase form is shown whenever the
-           passkey button ISN'T fully usable, so the user is never left
-           with zero visible way to unlock. -->
+           vault was actually configured with (passkeyConfigured, above) --
+           undefined -> show both, graceful degradation rather than an
+           error. The passphrase form is shown whenever the passkey button
+           ISN'T fully usable (including "usable in principle, but not on
+           this browser" -- isFirefox), so the user is never left with
+           zero visible way to unlock. -->
       <div v-else-if="vault.locked" class="mt-2 space-y-3">
         <p class="text-if-muted">Vault is locked.</p>
 
+        <UiTooltip
+          v-if="passkeyConfigured && isFirefox"
+          v-slot="{ id }"
+          text="Passkeys aren't supported in Firefox extensions yet -- use the passphrase option below."
+        >
+          <UiButton disabled :aria-describedby="id">Unlock with Passkey</UiButton>
+        </UiTooltip>
         <UiButton
-          v-if="
-            vault.configuredUnlockMethod === undefined ||
-            (vault.configuredUnlockMethod === 'passkey' && vault.passkeyCredentialId)
-          "
+          v-else-if="passkeyConfigured"
           :loading="vault.status === 'loading'"
           @click="clickUnlockWithPasskey()"
         >
@@ -442,11 +472,7 @@ async function submitUnlockPassphrase() {
         </UiButton>
 
         <form
-          v-if="
-            vault.configuredUnlockMethod === undefined ||
-            vault.configuredUnlockMethod === 'passphrase' ||
-            (vault.configuredUnlockMethod === 'passkey' && !vault.passkeyCredentialId)
-          "
+          v-if="!passkeyConfigured || isFirefox"
           class="space-y-2"
           @submit.prevent="submitUnlockPassphrase"
         >

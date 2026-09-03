@@ -23,10 +23,19 @@ import { useVaultStore } from '../../stores/vault.store';
 import UiButton from './UiButton.vue';
 import UiSpinner from './UiSpinner.vue';
 import UiTextInput from './UiTextInput.vue';
+import UiTooltip from './UiTooltip.vue';
 
 // biome-ignore-end lint/correctness/noUnusedImports: used in <template>
 
 withDefaults(defineProps<{ description?: string }>(), { description: '' });
+
+// import.meta.env.BROWSER is a WXT build-time constant (see
+// entrypoints/popup/App.vue's own header comment for the full "why" --
+// WebAuthn throws "The operation is insecure" from a Firefox extension
+// popup, confirmed via manual testing). Mirrored here for the same reason
+// this whole component mirrors that file's setup/unlock logic.
+// biome-ignore lint/correctness/noUnusedVariables: read from <template> -- Biome only lints the <script> block, it can't see template usage.
+const isFirefox = import.meta.env.BROWSER === 'firefox';
 
 // Fires once, the moment this component's own action actually unlocks (or
 // sets up) the vault -- callers use this to refetch whatever vault-scoped
@@ -104,7 +113,14 @@ async function submitUnlockPassphrase(): Promise<void> {
     </p>
 
     <div v-else-if="!vault.initialized" class="mt-4 space-y-3 text-left">
-      <UiButton :loading="vault.status === 'loading'" @click="clickSetupWithPasskey()">
+      <UiTooltip
+        v-if="isFirefox"
+        v-slot="{ id }"
+        text="Passkeys aren't supported in Firefox extensions yet -- use the passphrase option below."
+      >
+        <UiButton disabled :aria-describedby="id">Set up with Passkey (recommended)</UiButton>
+      </UiTooltip>
+      <UiButton v-else :loading="vault.status === 'loading'" @click="clickSetupWithPasskey()">
         Set up with Passkey (recommended)
       </UiButton>
       <form class="space-y-2" @submit.prevent="submitSetupPassphrase">
@@ -125,15 +141,22 @@ async function submitUnlockPassphrase(): Promise<void> {
     </div>
 
     <div v-else class="mt-4 space-y-3 text-left">
+      <UiTooltip
+        v-if="passkeyUsable() && isFirefox"
+        v-slot="{ id }"
+        text="Passkeys aren't supported in Firefox extensions yet -- use the passphrase option below."
+      >
+        <UiButton disabled :aria-describedby="id">Unlock with Passkey</UiButton>
+      </UiTooltip>
       <UiButton
-        v-if="passkeyUsable()"
+        v-else-if="passkeyUsable()"
         :loading="vault.status === 'loading'"
         @click="clickUnlockWithPasskey()"
       >
         Unlock with Passkey
       </UiButton>
       <form
-        v-if="!passkeyUsable()"
+        v-if="!passkeyUsable() || isFirefox"
         class="space-y-2"
         @submit.prevent="submitUnlockPassphrase"
       >
