@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { generatePassword } from '../../../../../background/vault/credentials/passwordGenerator';
+import { generatePassword } from '../../../shared/passwordGenerator';
 
 const CHARSET_CHARS = new Set(
   'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()-_=+[]{}',

@@ -33,6 +33,7 @@
 import {
   Bell,
   Check,
+  Dices,
   Globe,
   Key,
   KeyRound,
@@ -47,7 +48,7 @@ import {
   TriangleAlert,
   X,
 } from '@lucide/vue';
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { browser } from 'wxt/browser';
 import UiButton from '../../components/ui/UiButton.vue';
 import UiSection from '../../components/ui/UiSection.vue';
@@ -61,6 +62,7 @@ import { getFieldKey } from '../../shared/fieldKey';
 import type { ClassifiedField, ClassifiedForm } from '../../shared/messages';
 import type { CredentialRecord, ResponseType } from '../../shared/vault-schema';
 import { useFirewallStore } from '../../stores/firewall.store';
+import { usePasswordGeneratorStore } from '../../stores/passwordGenerator.store';
 import { usePendingCredentialStore } from '../../stores/pendingCredential.store';
 import { usePrivacyLedgerStore } from '../../stores/privacyLedger.store';
 import { useSavedCredentialsStore } from '../../stores/savedCredentials.store';
@@ -75,6 +77,7 @@ const firewall = useFirewallStore();
 const privacyLedger = usePrivacyLedgerStore();
 const pendingCredential = usePendingCredentialStore();
 const savedCredentials = useSavedCredentialsStore();
+const passwordGenerator = usePasswordGeneratorStore();
 const toast = useToastStore();
 
 // biome-ignore lint/correctness/noUnusedVariables: read from <template> -- Biome only lints the <script> block, it can't see template usage.
@@ -93,8 +96,9 @@ const ledgerSummary = computed(() => summarizeLedgerEntries(privacyLedger.entrie
 // failed refetch, falling back across stores could keep showing a stale
 // domain from whichever one last succeeded, right above a section
 // correctly reporting "could not determine the active tab" -- reading a
-// single store sidesteps that entirely.
-// biome-ignore lint/correctness/noUnusedVariables: read from <template> -- Biome only lints the <script> block, it can't see template usage.
+// single store sidesteps that entirely. Also read directly in <script> now
+// (the "Generate password" section's own origin-prefill watcher below), not
+// just <template> -- the biome-ignore this used to need is gone.
 const currentOrigin = computed(() => firewall.origin);
 
 // A persistent, at-a-glance, CLICKABLE vault-state icon in the header --
@@ -188,6 +192,41 @@ onMounted(() => {
   vault.fetchStatus();
   refreshVaultScopedSections();
 });
+
+// Prefills the "Generate password" section's own Site field from the active
+// tab's origin the moment it resolves -- reuses currentOrigin rather than
+// this component calling resolveActiveTab() a second time (see
+// currentOrigin's own header comment: every site-scoped store already
+// resolves it independently). Only ever sets it once (`!passwordGenerator.origin`
+// guards it) -- the field stays a plain editable UiTextInput after that, so
+// a user who deliberately clears or retypes it never gets overwritten by a
+// later resolution.
+watch(
+  currentOrigin,
+  (origin) => {
+    if (origin && !passwordGenerator.origin) passwordGenerator.origin = origin;
+  },
+  { immediate: true },
+);
+
+// biome-ignore lint/correctness/noUnusedVariables: called from @click in <template> -- Biome only lints the <script> block, it can't see template usage.
+async function clickCopyGeneratedPassword(): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(passwordGenerator.password);
+    toast.push('Password copied.', 'success');
+  } catch {
+    toast.push('Could not copy to clipboard.', 'error');
+  }
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: called from @click in <template> -- Biome only lints the <script> block, it can't see template usage.
+async function clickSaveGeneratedPassword(): Promise<void> {
+  await passwordGenerator.save();
+  if (!passwordGenerator.saveError) {
+    toast.push('Credential saved.', 'success');
+    savedCredentials.fetchCredentials();
+  }
+}
 
 // Preserves each field's true index within form.fields (needed for
 // getFieldKey's positional fallback) while still letting the template
@@ -677,6 +716,42 @@ async function submitUnlockPassphrase() {
         <p v-if="pendingCredential.actionError" class="text-xs text-red-600">
           {{ pendingCredential.actionError }}
         </p>
+      </div>
+    </UiSection>
+
+    <!-- Standalone generator -- independent of any form on the current
+         page, unlike every other site-scoped section here. Placed right
+         before "Saved logins" so generate -> save reads top-to-bottom into
+         that list. In-page suggestion UI (a hover icon on a real password
+         field, Chrome/1Password-style) is deliberately out of scope here --
+         that's docs/roadmap.md's Phase 8, sequenced after Phase 7 Part B
+         (biometrics), not started yet. -->
+    <UiSection title="Generate password" :icon="Dices">
+      <div class="mt-2 space-y-2">
+        <UiButton variant="secondary" @click="passwordGenerator.generate()">
+          {{ passwordGenerator.password ? 'Generate another' : 'Generate' }}
+        </UiButton>
+
+        <template v-if="passwordGenerator.password">
+          <div class="flex gap-2">
+            <UiTextInput :model-value="passwordGenerator.password" type="text" readonly />
+            <UiButton variant="secondary" @click="clickCopyGeneratedPassword()">Copy</UiButton>
+          </div>
+
+          <UiTextInput v-model="passwordGenerator.origin" placeholder="Site (e.g. example.com)" />
+          <UiTextInput v-model="passwordGenerator.username" placeholder="Username (optional)" />
+          <UiButton
+            :disabled="passwordGenerator.origin.length === 0"
+            :loading="passwordGenerator.saving"
+            @click="clickSaveGeneratedPassword()"
+          >
+            Save credential
+          </UiButton>
+
+          <p v-if="passwordGenerator.saveError" class="text-xs text-red-600">
+            {{ passwordGenerator.saveError }}
+          </p>
+        </template>
       </div>
     </UiSection>
 
