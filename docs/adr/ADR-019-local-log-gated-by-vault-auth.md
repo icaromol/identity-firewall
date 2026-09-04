@@ -1,0 +1,22 @@
+# ADR-019: The local dev log reuses vault authentication, not a second password
+
+## Status
+Accepted
+
+## Context
+A local, persisted log for dev/troubleshooting use (`background/logging/`) was requested with three follow-up requirements: an on/off toggle, some form of access control (since debug detail could be worth protecting), and an extra re-confirmation step specifically before exporting the log file.
+
+The initial proposal for access control was a bespoke scheme: a "public" password baked into a `.env` file (some encryption applied to it) plus a separate user-set "private" password with an auto-updating hook keeping the two in sync. This was evaluated and rejected before implementation, for a reason specific to this project's actual deployment model: Identity Firewall is open-source and runs entirely client-side. Any value shipped in the built extension — including anything derived from a `.env` file bundled at build time — ends up readable inside the distributed JS bundle, in a public repository. A "public password" in that context provides no real protection, and inventing a bespoke password-plus-hook mechanism would conflict with [ADR-003](ADR-003-web-crypto-not-custom.md) (no hand-rolled crypto) and with this project's own honest threat-model stance (`docs/threat-model.md`) of never claiming a protection it doesn't actually deliver.
+
+## Decision
+Reuse the vault's own existing, already-audited authentication instead of inventing a second one:
+
+- **Viewing and clearing the log** are gated on the vault already being unlocked — the Configuration tab's Logs card renders `components/ui/VaultLockedNotice.vue` (the same reusable "unlock to continue" component already wired into the ledger and Personal Data tabs) whenever `vault.locked || !vault.initialized`, and the real summary/actions only once unlocked.
+- **Exporting the log file requires an additional re-confirmation**, even though the vault is already unlocked: clicking "Download logs" reveals an inline passphrase/passkey form, and only a successful `vault.unlockWithPassphrase()`/`unlockWithPasskey()` call lets the actual `GET_LOGS` fetch + file download proceed (`entrypoints/options/App.vue`'s `clickExportConfirmWithPasskey`/`submitExportConfirmWithPassphrase`).
+- This re-confirmation calls the *exact same* store actions the real unlock flow uses, purely to check whether the response succeeds — no new message type, no new crypto. This is safe because `unlockVault()` (`background/vault/unlock.ts`) has no "already unlocked" short-circuit: every call re-derives the key from scratch and verifies it by actually decrypting the vault index *before* touching the cache. A wrong passphrase/passkey attempt fails that decryption and never reaches the cache, leaving the real session's unlock state untouched (`stores/vault.store.ts`'s `unlockWithPassphrase`/`unlockWithPasskey` report failure via `vault.error` without ever forcing `vault.locked` back to `true`).
+- The on/off toggle is a plain `AppSettings.logsEnabled: boolean` field (default `true`), unrelated to authentication — it only controls whether `background/logging/handler.ts`'s `log()` persists entries at all; it never affects console output.
+
+## Consequences
+- **The log's own storage is NOT vault-encrypted.** `background/logging/storage.ts` is plain `browser.storage.local` (key `if_logs_v1`), capped at 500 entries — the same storage tier `background/settings/storage.ts` already uses, deliberately not the vault's tiered/encrypted storage (ADR-015). This is a conscious choice, not an oversight: the vault-unlock gate above is a **UI-level courtesy**, not a cryptographic guarantee. Anything with direct access to the browser profile's extension storage (e.g. local malware, per this project's own threat model) can read the raw log content regardless of vault lock state — exactly the same exposure `AppSettings` already has today. Documented here explicitly so this isn't mistaken for the same protection the vault's actual encrypted tiers provide.
+- **Zero new crypto and zero new message types for authentication** — the re-confirmation reuses `VAULT_UNLOCK` end-to-end, keeping the log feature's own attack surface limited to two new, non-authenticating messages (`GET_LOGS`, `CLEAR_LOGS`).
+- If the log ever needs the vault's real at-rest protection (e.g. because it starts capturing more sensitive detail than it does today), that's a bigger, separate change — moving it into the tiered vault storage — not something this decision attempts now.
