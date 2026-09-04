@@ -16,6 +16,11 @@ Running the extension locally surfaced a need for a persisted record of internal
 - **Exporting** re-confirms via an inline passphrase/passkey form before the actual file download runs (ADR-019).
 - **Export format**: plain, human-readable text (one entry per line: timestamp, level, message, detail) — a debug log meant to be read directly, not a data-interchange format. Filename: `identity-firewall-logs-<timestamp>.log`.
 - **Storage**: capped ring buffer, 500 entries, plain `browser.storage.local` (key `if_logs_v1`) — no IndexedDB, no new library, matching the user's own explicit "no overengineering" request and this codebase's own convention that every same-sized concern under `background/` splits into `storage.ts` + `handler.ts`.
+- **The Logs card shows the actual entries live**, not just a count — a scrollable, newest-first list (capped to the most recent 100 rendered, well below the 500-entry backend cap, to keep DOM size cheap in a perpetually-open Options tab), colored by level using `theme.css`'s own `if-tangerine` (error) and `if-lagoon` (debug) accents rather than Tailwind's generic `red-600` — this project's established palette, not an ad hoc color choice. "Live" is `browser.storage.onChanged` (first use of this API anywhere in the codebase): the Options page listens for any `'local'`-area storage change and refetches `GET_LOGS`, rather than a new dedicated `LOGS_CHANGED` message — deliberately not filtered to the log's own storage key, since that key is a background-private implementation detail (ADR-019) this component has no reason to duplicate, and refetching on any local-storage write is cheap enough not to need that precision.
+
+## Known limitation
+
+`wxt/testing/fake-browser` does not implement/fire `storage.onChanged` (confirmed by inspecting its source — no matches for `onChanged` anywhere in the package), so the live-update wiring itself has no unit-test coverage and relies on manual verification only. Matches this codebase's existing precedent for fake-browser gaps (`chrome.idle` is the other one, called out in `autolock-and-configuration.md`).
 
 ## Implementation
 
@@ -25,10 +30,10 @@ Running the extension locally surfaced a need for a persisted record of internal
 - `background/router/registry.ts` — new `'logging'` capability.
 - Retrofitted 5 existing `console.debug`/`console.error` call sites to route through `log()`: `background/badge.ts`, `background/vault/credentials/autoSaveNotice.ts`, `background/settings/handler.ts`, `background/settings/idleLock.ts` (×2).
 - `stores/logs.store.ts` — `fetchLogs()`/`clear()`/`exportLogs()`, mirroring `stores/appSettings.store.ts`'s shape; `exportLogs()` adapts `stores/vault.store.ts`'s `downloadBackupBundle` Blob/anchor-click pattern for plain text instead of JSON.
-- `entrypoints/options/App.vue`'s Configuration tab — an "Enable logging" toggle card, and a "Logs" card (currently laid out as a secondary right-hand column alongside the other Configuration cards) with the `VaultLockedNotice` gate, entry-count summary, Clear button, and the Download-with-re-confirmation flow.
+- `entrypoints/options/App.vue`'s Configuration tab — an "Enable logging" toggle card, and a "Logs" card (currently laid out as a secondary right-hand column alongside the other Configuration cards) with the `VaultLockedNotice` gate, entry-count summary, the live palette-colored entry list, Clear button, and the Download-with-re-confirmation flow.
 
 ## Verification
 
 - `pnpm check` — unit tests for `background/logging/storage.ts` (append/trim-at-500/clear/concurrent-append ordering) and `background/logging/handler.ts` (console passthrough, `logsEnabled` respected, never throws on a storage failure, `Error` details serialize to their stack/message).
 - No `pnpm test:e2e` (standing user preference — e2e is run manually).
-- Manually verified: toggling logging off/on, triggering a real failure path (Firefox's benign `browser.action`-vs-`browser.browserAction` badge error), unlocking the vault and seeing a real entry count, and downloading a real `.log` file via the re-confirmation form.
+- Manually verified: toggling logging off/on, triggering a real failure path (Firefox's benign `browser.action`-vs-`browser.browserAction` badge error), unlocking the vault and seeing a real entry count, downloading a real `.log` file via the re-confirmation form, and watching the entry list update live (no manual refresh) while a real failure path fired repeatedly with the Configuration tab already open.

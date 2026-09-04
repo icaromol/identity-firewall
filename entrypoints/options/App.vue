@@ -20,6 +20,7 @@
 // biome-ignore-start lint/correctness/noUnusedImports: used in <template> -- Biome only lints the <script> block, it can't see template usage.
 import { Check, DatabaseBackup, ScrollText, Settings, Shield, UserRound, X } from '@lucide/vue';
 import { computed, onMounted, reactive, ref } from 'vue';
+import { browser } from 'wxt/browser';
 import UiButton from '../../components/ui/UiButton.vue';
 import UiSpinner from '../../components/ui/UiSpinner.vue';
 import UiTextInput from '../../components/ui/UiTextInput.vue';
@@ -28,6 +29,7 @@ import UiToggle from '../../components/ui/UiToggle.vue';
 import UiTooltip from '../../components/ui/UiTooltip.vue';
 import VaultLockedNotice from '../../components/ui/VaultLockedNotice.vue';
 // biome-ignore-end lint/correctness/noUnusedImports: used in <template>
+import type { LogEntry, LogLevel } from '../../shared/messages';
 import { isAutoLockDisabled } from '../../shared/settings';
 import type {
   PersonalData,
@@ -129,6 +131,18 @@ onMounted(() => {
   vault.fetchStatus().then(() => {
     if (!vault.locked && vault.initialized) logs.fetchLogs();
   });
+  // Live updates: background/logging/handler.ts writes a new entry to
+  // browser.storage.local every time anything in the background calls
+  // log(...), independently of this Options tab. Refetching on the raw
+  // storage event (rather than adding a dedicated LOGS_CHANGED message)
+  // keeps this a plain, existing-primitive listener -- no new message
+  // type, and it fires for any storage.local write, not just the log key,
+  // since the log's own storage key is a background-private implementation
+  // detail (see ADR-019) this component has no reason to duplicate. Only
+  // refetches while the Logs card would actually show something.
+  browser.storage.onChanged.addListener((_changes, areaName) => {
+    if (areaName === 'local' && !vault.locked && vault.initialized) logs.fetchLogs();
+  });
   fetchPersonalDataTab();
   appSettings.fetchAppSettings();
 });
@@ -209,11 +223,29 @@ async function toggleLogsEnabled(): Promise<void> {
   }
 }
 
+// Newest first (storage.ts appends oldest-to-newest) and capped well below
+// the backend's own 500-entry ring buffer -- this is a live troubleshooting
+// view, not a full-history browser, and DOM size stays cheap in a
+// perpetually-open Options tab.
 // biome-ignore lint/correctness/noUnusedVariables: called from <template> -- Biome only lints the <script> block, it can't see template usage.
-const lastLogEntryLabel = computed<string | null>(() => {
-  const last = logs.entries.at(-1);
-  return last ? new Date(last.timestamp).toLocaleString() : null;
-});
+const recentLogEntries = computed<LogEntry[]>(() => [...logs.entries].reverse().slice(0, 100));
+
+// biome-ignore lint/correctness/noUnusedVariables: called from <template> -- Biome only lints the <script> block, it can't see template usage.
+function formatLogTimestamp(timestamp: number): string {
+  return new Date(timestamp).toLocaleTimeString();
+}
+
+// theme.css's own if-* accent colors, not Tailwind's generic red-600 --
+// tangerine for error (this app's one warm/alarm-toned accent), lagoon for
+// debug (routine, informational). Opacity-modified (`/15`) backgrounds
+// stay legible in both light and dark since if-tangerine/if-lagoon are
+// fixed brand hues, not theme-relative tokens.
+// biome-ignore lint/correctness/noUnusedVariables: called from <template> -- Biome only lints the <script> block, it can't see template usage.
+function logLevelClasses(level: LogLevel): string {
+  return level === 'error'
+    ? 'bg-if-tangerine/15 text-if-tangerine'
+    : 'bg-if-lagoon/15 text-if-lagoon';
+}
 
 // biome-ignore lint/correctness/noUnusedVariables: called from @click in <template> -- Biome only lints the <script> block, it can't see template usage.
 async function clickClearLogs(): Promise<void> {
@@ -812,9 +844,40 @@ async function submitRestoreWithPassphrase(): Promise<void> {
 
           <div v-else class="mt-2 space-y-2">
             <p class="text-sm text-if-navy">{{ logs.entries.length }} entries recorded.</p>
-            <p v-if="lastLogEntryLabel" class="text-xs text-if-faint">
-              Last entry: {{ lastLogEntryLabel }}
+
+            <!-- Newest first, palette-colored by level (if-tangerine/
+                 if-lagoon, not Tailwind's generic red-600) -- updates live
+                 via the storage.onChanged listener above, with no manual
+                 refresh needed while this tab stays open. -->
+            <p v-if="recentLogEntries.length === 0" class="text-xs text-if-faint">
+              Nothing logged yet.
             </p>
+            <ul v-else class="max-h-64 space-y-1 overflow-y-auto rounded border border-if-hairline p-2">
+              <li
+                v-for="(entry, index) in recentLogEntries"
+                :key="`${entry.timestamp}-${index}`"
+                class="flex items-start gap-2 border-b border-if-hairline pb-1.5 last:border-0 last:pb-0"
+              >
+                <span class="shrink-0 font-mono text-[11px] text-if-faint">
+                  {{ formatLogTimestamp(entry.timestamp) }}
+                </span>
+                <span
+                  class="shrink-0 rounded px-1 font-heading text-[10px] font-bold uppercase tracking-wide"
+                  :class="logLevelClasses(entry.level)"
+                >
+                  {{ entry.level }}
+                </span>
+                <span class="min-w-0 flex-1">
+                  <p class="text-xs text-if-navy">{{ entry.message }}</p>
+                  <p
+                    v-if="entry.detail"
+                    class="mt-0.5 whitespace-pre-wrap break-words font-mono text-[11px] text-if-subtle"
+                  >
+                    {{ entry.detail }}
+                  </p>
+                </span>
+              </li>
+            </ul>
 
             <div class="flex flex-wrap gap-2">
               <UiButton
