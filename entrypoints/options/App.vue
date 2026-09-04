@@ -695,7 +695,7 @@ async function submitRestoreWithPassphrase(): Promise<void> {
       </div>
     </section>
 
-    <section v-if="activeTab === 'configuration'" class="mt-6 max-w-md space-y-4">
+    <section v-if="activeTab === 'configuration'" class="mt-6 max-w-3xl">
       <p
         v-if="appSettings.status === 'idle' || appSettings.status === 'loading'"
         class="flex items-center gap-2 text-if-muted"
@@ -707,80 +707,92 @@ async function submitRestoreWithPassphrase(): Promise<void> {
         {{ appSettings.error }}
       </p>
 
-      <div v-else class="space-y-4">
-        <div class="rounded border border-if-hairline p-3">
-          <label for="auto-lock-select" class="font-heading text-xs font-bold uppercase tracking-wide text-if-muted">
-            Auto-lock after
-          </label>
-          <p class="mt-1 text-xs text-if-faint">
-            Locks the vault after this much inactivity, or immediately if the OS screen locks.
-          </p>
-          <select
-            id="auto-lock-select"
-            v-model="autoLockSelectValue"
-            :disabled="appSettings.saving"
-            class="mt-2 w-full rounded border border-if-hairline bg-if-white p-1.5 text-sm text-if-navy disabled:opacity-50"
-          >
-            <option v-for="option in autoLockOptions" :key="option.value" :value="option.value">
-              {{ option.label }}
-            </option>
-          </select>
-        </div>
-
-        <div class="rounded border border-if-hairline p-3">
-          <p class="font-heading text-xs font-bold uppercase tracking-wide text-if-muted">
-            Saving a new login
-          </p>
-          <div class="mt-2">
-            <UiToggle
-              :model-value="appSettings.data.credentialSaveMode === 'auto'"
+      <!-- Two columns: everyday preferences on the left, the Logs card as
+           its own secondary column on the right -- both still the same
+           Configuration tab, not a separate tab. Stacks to one column below
+           md, since the popup's own dashboard width is comfortably above
+           that but a narrow window shouldn't squeeze both. -->
+      <div v-else class="grid gap-4 md:grid-cols-[minmax(0,1fr)_18rem]">
+        <div class="space-y-4">
+          <div class="rounded border border-if-hairline p-3">
+            <label for="auto-lock-select" class="font-heading text-xs font-bold uppercase tracking-wide text-if-muted">
+              Auto-lock after
+            </label>
+            <p class="mt-1 text-xs text-if-faint">
+              Locks the vault after this much inactivity, or immediately if the OS screen locks.
+            </p>
+            <select
+              id="auto-lock-select"
+              v-model="autoLockSelectValue"
               :disabled="appSettings.saving"
-              @update:model-value="toggleCredentialSaveMode()"
+              class="mt-2 w-full rounded border border-if-hairline bg-if-white p-1.5 text-sm text-if-navy disabled:opacity-50"
             >
-              <span class="text-sm text-if-navy">Auto-save without asking</span>
-            </UiToggle>
+              <option v-for="option in autoLockOptions" :key="option.value" :value="option.value">
+                {{ option.label }}
+              </option>
+            </select>
           </div>
-          <p class="mt-1 text-xs text-if-faint">
-            Off (default): a "Save this login?" prompt appears every time. On: saved to your local
-            vault immediately, with a confirmation the next time you open the extension icon.
-          </p>
-        </div>
 
-        <div class="rounded border border-if-hairline p-3">
-          <p class="font-heading text-xs font-bold uppercase tracking-wide text-if-muted">
-            Local dev log
-          </p>
-          <div class="mt-2">
-            <UiToggle
-              :model-value="appSettings.data.logsEnabled"
-              :disabled="appSettings.saving"
-              @update:model-value="toggleLogsEnabled()"
-            >
-              <span class="text-sm text-if-navy">Enable logging</span>
-            </UiToggle>
+          <div class="rounded border border-if-hairline p-3">
+            <p class="font-heading text-xs font-bold uppercase tracking-wide text-if-muted">
+              Saving a new login
+            </p>
+            <div class="mt-2">
+              <UiToggle
+                :model-value="appSettings.data.credentialSaveMode === 'auto'"
+                :disabled="appSettings.saving"
+                @update:model-value="toggleCredentialSaveMode()"
+              >
+                <span class="text-sm text-if-navy">Auto-save without asking</span>
+              </UiToggle>
+            </div>
+            <p class="mt-1 text-xs text-if-faint">
+              Off (default): a "Save this login?" prompt appears every time. On: saved to your
+              local vault immediately, with a confirmation the next time you open the extension
+              icon.
+            </p>
           </div>
-          <p class="mt-1 text-xs text-if-faint">
-            Keeps a bounded local record of internal errors/debug events for troubleshooting. Never
-            leaves your device unless you export it below.
-          </p>
-        </div>
 
-        <div class="rounded border border-if-hairline p-3">
-          <p class="font-heading text-xs font-bold uppercase tracking-wide text-if-muted">
-            Filling a saved login
-          </p>
-          <div class="mt-2 flex items-center gap-3 text-sm">
-            <span class="text-if-navy">Manual (click Fill)</span>
-            <UiTooltip
-              v-slot="{ id }"
-              text="Coming in a later phase, once biometric authorization gates it -- see Phase 8."
-            >
-              <label class="flex items-center gap-1.5 text-if-faint" :aria-describedby="id">
-                <input type="radio" disabled />
-                Auto-fill
-              </label>
-            </UiTooltip>
+          <div class="rounded border border-if-hairline p-3">
+            <p class="font-heading text-xs font-bold uppercase tracking-wide text-if-muted">
+              Local dev log
+            </p>
+            <div class="mt-2">
+              <UiToggle
+                :model-value="appSettings.data.logsEnabled"
+                :disabled="appSettings.saving"
+                @update:model-value="toggleLogsEnabled()"
+              >
+                <span class="text-sm text-if-navy">Enable logging</span>
+              </UiToggle>
+            </div>
+            <p class="mt-1 text-xs text-if-faint">
+              Keeps a bounded local record of internal errors/debug events for troubleshooting.
+              Never leaves your device unless you export it in the Logs column.
+            </p>
           </div>
+
+          <div class="rounded border border-if-hairline p-3">
+            <p class="font-heading text-xs font-bold uppercase tracking-wide text-if-muted">
+              Filling a saved login
+            </p>
+            <div class="mt-2 flex items-center gap-3 text-sm">
+              <span class="text-if-navy">Manual (click Fill)</span>
+              <UiTooltip
+                v-slot="{ id }"
+                text="Coming in a later phase, once biometric authorization gates it -- see Phase 8."
+              >
+                <label class="flex items-center gap-1.5 text-if-faint" :aria-describedby="id">
+                  <input type="radio" disabled />
+                  Auto-fill
+                </label>
+              </UiTooltip>
+            </div>
+          </div>
+
+          <p v-if="appSettings.saveError" class="text-xs text-red-600">
+            {{ appSettings.saveError }}
+          </p>
         </div>
 
         <!-- Not gated behind a second password -- reuses the vault's own
@@ -804,7 +816,7 @@ async function submitRestoreWithPassphrase(): Promise<void> {
               Last entry: {{ lastLogEntryLabel }}
             </p>
 
-            <div class="flex gap-2">
+            <div class="flex flex-wrap gap-2">
               <UiButton
                 variant="secondary"
                 :disabled="logs.entries.length === 0"
@@ -861,8 +873,6 @@ async function submitRestoreWithPassphrase(): Promise<void> {
             <p v-if="logs.error" class="text-xs text-red-600">{{ logs.error }}</p>
           </div>
         </div>
-
-        <p v-if="appSettings.saveError" class="text-xs text-red-600">{{ appSettings.saveError }}</p>
       </div>
     </section>
   </main>
