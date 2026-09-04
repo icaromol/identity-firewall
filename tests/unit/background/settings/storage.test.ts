@@ -26,7 +26,7 @@ describe('app settings storage', () => {
     await setAppSettings({ autoLockSeconds: 60 });
     const result = await setAppSettings({ credentialSaveMode: 'auto' });
 
-    expect(result).toEqual({ autoLockSeconds: 60, credentialSaveMode: 'auto' });
+    expect(result).toEqual({ autoLockSeconds: 60, credentialSaveMode: 'auto', logsEnabled: true });
   });
 
   it('autoLockSeconds can be explicitly set to null (never auto-lock)', async () => {
@@ -40,7 +40,7 @@ describe('app settings storage', () => {
     await setAppSettings({ autoLockSeconds: 60, credentialSaveMode: 'auto' });
     const result = await setAppSettings({ autoLockSeconds: undefined, credentialSaveMode: 'ask' });
 
-    expect(result).toEqual({ autoLockSeconds: 60, credentialSaveMode: 'ask' });
+    expect(result).toEqual({ autoLockSeconds: 60, credentialSaveMode: 'ask', logsEnabled: true });
   });
 
   it('falls back to defaults when stored data fails schema validation', async () => {

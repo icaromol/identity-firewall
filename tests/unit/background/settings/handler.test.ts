@@ -112,6 +112,10 @@ describe('app settings handlers', () => {
     expect(resultA.autoLockSeconds).toBe(3600);
     // B's response reflects BOTH changes -- it read A's already-committed
     // write, and nothing lets A's stale `next` clobber it afterward.
-    expect(resultB).toEqual({ autoLockSeconds: 3600, credentialSaveMode: 'auto' });
+    expect(resultB).toEqual({
+      autoLockSeconds: 3600,
+      credentialSaveMode: 'auto',
+      logsEnabled: true,
+    });
   });
 });

@@ -4,6 +4,7 @@ import type {
   SetAppSettingsMessage,
   SetAppSettingsResponse,
 } from '../../shared/messages';
+import { log } from '../logging/handler';
 import { applyDetectionInterval } from './idleLock';
 import { getAppSettings, setAppSettings } from './storage';
 
@@ -40,7 +41,7 @@ export async function handleSetAppSettings(
     try {
       await applyDetectionInterval(next.autoLockSeconds);
     } catch (err) {
-      console.error('Identity Firewall: failed to apply the new auto-lock interval', err);
+      log('error', 'Identity Firewall: failed to apply the new auto-lock interval', err);
     }
   });
 }

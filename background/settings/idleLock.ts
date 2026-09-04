@@ -27,6 +27,7 @@
 
 import { browser } from 'wxt/browser';
 import { isAutoLockDisabled, MIN_AUTO_LOCK_SECONDS } from '../../shared/settings';
+import { log } from '../logging/handler';
 import { lockVault } from '../vault/unlock';
 import { getAppSettings, setAppSettings } from './storage';
 
@@ -91,7 +92,7 @@ export function initIdleLock(): void {
 
   browser.idle.onStateChanged.addListener((state) => {
     handleIdleStateChanged(state).catch((err) => {
-      console.error('Identity Firewall: idle-lock state-change handler failed', err);
+      log('error', 'Identity Firewall: idle-lock state-change handler failed', err);
     });
   });
 
@@ -107,7 +108,7 @@ export function initIdleLock(): void {
   // concern.
   setAppSettings({}, (settings) => applyDetectionInterval(settings.autoLockSeconds)).catch(
     (err) => {
-      console.error('Identity Firewall: failed to apply the stored auto-lock interval', err);
+      log('error', 'Identity Firewall: failed to apply the stored auto-lock interval', err);
     },
   );
 }

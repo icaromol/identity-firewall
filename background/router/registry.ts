@@ -13,6 +13,7 @@ import type { ExtensionMessage } from '../../shared/messages';
 import { handleGetPendingRequest, handleSubmitFieldDecisions } from '../firewall/handler';
 import { handleFormDetected, handleFormSubmitted } from '../formDetection/handler';
 import { handleCreateServiceIdentity, handleGetServiceIdentity } from '../identity/handler';
+import { handleClearLogs, handleGetLogs } from '../logging/handler';
 import {
   handleDeletePolicy,
   handleGetAllPrivacyLedger,
@@ -50,7 +51,8 @@ export type Capability =
   | 'identity'
   | 'firewall'
   | 'policy'
-  | 'settings';
+  | 'settings'
+  | 'logging';
 
 export interface HandlerContext {
   sender: Browser.runtime.MessageSender;
@@ -199,5 +201,13 @@ export const registry: Registry = {
   SET_APP_SETTINGS: {
     capability: 'settings',
     handle: (message) => handleSetAppSettings(message),
+  },
+  GET_LOGS: {
+    capability: 'logging',
+    handle: (message) => handleGetLogs(message),
+  },
+  CLEAR_LOGS: {
+    capability: 'logging',
+    handle: (message) => handleClearLogs(message),
   },
 };

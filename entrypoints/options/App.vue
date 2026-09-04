@@ -38,6 +38,7 @@ import type {
 import { PERSONAL_DATA_FIELD_DEFAULT_ACTION } from '../../shared/vault-schema';
 import { useAllSitesLedgerStore } from '../../stores/allSitesLedger.store';
 import { useAppSettingsStore } from '../../stores/appSettings.store';
+import { useLogsStore } from '../../stores/logs.store';
 import { usePersonalDataStore } from '../../stores/personalData.store';
 import { usePoliciesStore } from '../../stores/policies.store';
 import { type LedgerSummary, summarizeLedgerEntries } from '../../stores/shared/ledgerSummary';
@@ -50,6 +51,7 @@ const vault = useVaultStore();
 const toast = useToastStore();
 const appSettings = useAppSettingsStore();
 const policies = usePoliciesStore();
+const logs = useLogsStore();
 
 type Tab = 'ledger' | 'personalData' | 'backup' | 'configuration';
 // biome-ignore lint/correctness/noUnusedVariables: read/written from <template> -- Biome only lints the <script> block, it can't see template usage.
@@ -118,7 +120,15 @@ function fetchPersonalDataTab(): void {
 
 onMounted(() => {
   allSitesLedger.fetchLedger();
-  vault.fetchStatus();
+  // GET_LOGS itself never checks the vault (background/logging/storage.ts
+  // is plain browser.storage.local, not vault-encrypted) -- the Logs card's
+  // gate is a UI-only courtesy tied to vault.locked, so fetching only
+  // happens once this resolves and confirms the vault is actually unlocked
+  // already (the locked case is instead covered by VaultLockedNotice's own
+  // @unlocked event further down).
+  vault.fetchStatus().then(() => {
+    if (!vault.locked && vault.initialized) logs.fetchLogs();
+  });
   fetchPersonalDataTab();
   appSettings.fetchAppSettings();
 });
@@ -185,6 +195,76 @@ async function toggleCredentialSaveMode(): Promise<void> {
   if (appSettings.justSaved) {
     toast.push(next === 'auto' ? 'Auto-save enabled.' : 'Auto-save disabled.', 'success');
   }
+}
+
+// Mirrors toggleCredentialSaveMode's own re-entrancy guard immediately
+// above it.
+// biome-ignore lint/correctness/noUnusedVariables: called from @update:model-value in <template> -- Biome only lints the <script> block, it can't see template usage.
+async function toggleLogsEnabled(): Promise<void> {
+  if (appSettings.saving) return;
+  const next = !appSettings.data.logsEnabled;
+  await appSettings.saveAppSettings({ logsEnabled: next });
+  if (appSettings.justSaved) {
+    toast.push(next ? 'Logging enabled.' : 'Logging disabled.', 'success');
+  }
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: called from <template> -- Biome only lints the <script> block, it can't see template usage.
+const lastLogEntryLabel = computed<string | null>(() => {
+  const last = logs.entries.at(-1);
+  return last ? new Date(last.timestamp).toLocaleString() : null;
+});
+
+// biome-ignore lint/correctness/noUnusedVariables: called from @click in <template> -- Biome only lints the <script> block, it can't see template usage.
+async function clickClearLogs(): Promise<void> {
+  await logs.clear();
+  if (!logs.error) toast.push('Logs cleared.', 'success');
+}
+
+// Same passkey-configured check as VaultLockedNotice's own passkeyUsable()
+// (components/ui/VaultLockedNotice.vue), minus the "unknown method yet"
+// branch -- the vault is already confirmed initialized by the time this
+// card is reachable, so configuredUnlockMethod is never undefined here.
+// biome-ignore lint/correctness/noUnusedVariables: called from <template> -- Biome only lints the <script> block, it can't see template usage.
+function exportPasskeyUsable(): boolean {
+  return vault.configuredUnlockMethod === 'passkey' && vault.passkeyCredentialId !== undefined;
+}
+
+const showExportConfirm = ref(false);
+const exportReconfirmPassphrase = ref('');
+
+// biome-ignore lint/correctness/noUnusedVariables: called from @click in <template> -- Biome only lints the <script> block, it can't see template usage.
+function cancelExportConfirm(): void {
+  showExportConfirm.value = false;
+  exportReconfirmPassphrase.value = '';
+  vault.error = null;
+}
+
+// Re-proves the user still knows the vault's own passphrase/passkey before
+// letting the log file (which may contain debug detail) leave the browser
+// -- reuses vault.unlockWithPasskey() purely as a re-authentication check
+// (see docs/plans' "gated by the vault" plan: it re-derives and verifies
+// against the real vault index before ever touching the cache, so a wrong
+// attempt fails cleanly without disturbing the already-unlocked session).
+// No Firefox tooltip-disable here, unlike the popup/VaultLockedNotice's own
+// passkey buttons -- this is the Options page, a persistent tab rather
+// than a popup, and its pre-existing restoreWithPasskey button (Backup &
+// recovery tab) is already exposed to Firefox unguarded.
+// biome-ignore lint/correctness/noUnusedVariables: called from @click in <template> -- Biome only lints the <script> block, it can't see template usage.
+async function clickExportConfirmWithPasskey(): Promise<void> {
+  await vault.unlockWithPasskey();
+  if (vault.error) return;
+  showExportConfirm.value = false;
+  await logs.exportLogs();
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: called from @submit.prevent in <template> -- Biome only lints the <script> block, it can't see template usage.
+async function submitExportConfirmWithPassphrase(): Promise<void> {
+  await vault.unlockWithPassphrase(exportReconfirmPassphrase.value);
+  exportReconfirmPassphrase.value = '';
+  if (vault.error) return;
+  showExportConfirm.value = false;
+  await logs.exportLogs();
 }
 
 // biome-ignore lint/correctness/noUnusedVariables: called from @submit.prevent in <template> -- Biome only lints the <script> block, it can't see template usage.
@@ -668,6 +748,25 @@ async function submitRestoreWithPassphrase(): Promise<void> {
 
         <div class="rounded border border-if-hairline p-3">
           <p class="font-heading text-xs font-bold uppercase tracking-wide text-if-muted">
+            Local dev log
+          </p>
+          <div class="mt-2">
+            <UiToggle
+              :model-value="appSettings.data.logsEnabled"
+              :disabled="appSettings.saving"
+              @update:model-value="toggleLogsEnabled()"
+            >
+              <span class="text-sm text-if-navy">Enable logging</span>
+            </UiToggle>
+          </div>
+          <p class="mt-1 text-xs text-if-faint">
+            Keeps a bounded local record of internal errors/debug events for troubleshooting. Never
+            leaves your device unless you export it below.
+          </p>
+        </div>
+
+        <div class="rounded border border-if-hairline p-3">
+          <p class="font-heading text-xs font-bold uppercase tracking-wide text-if-muted">
             Filling a saved login
           </p>
           <div class="mt-2 flex items-center gap-3 text-sm">
@@ -681,6 +780,85 @@ async function submitRestoreWithPassphrase(): Promise<void> {
                 Auto-fill
               </label>
             </UiTooltip>
+          </div>
+        </div>
+
+        <!-- Not gated behind a second password -- reuses the vault's own
+             real unlock state (see docs/plans' "gated by the vault" plan).
+             Reading/clearing only need the vault already unlocked;
+             exporting additionally re-confirms via the passphrase/passkey
+             form below. -->
+        <div class="rounded border border-if-hairline p-3">
+          <p class="font-heading text-xs font-bold uppercase tracking-wide text-if-muted">Logs</p>
+
+          <VaultLockedNotice
+            v-if="vault.locked || !vault.initialized"
+            class="!mt-2 !max-w-none"
+            description="Sign in to view or export the local dev log."
+            @unlocked="logs.fetchLogs()"
+          />
+
+          <div v-else class="mt-2 space-y-2">
+            <p class="text-sm text-if-navy">{{ logs.entries.length }} entries recorded.</p>
+            <p v-if="lastLogEntryLabel" class="text-xs text-if-faint">
+              Last entry: {{ lastLogEntryLabel }}
+            </p>
+
+            <div class="flex gap-2">
+              <UiButton
+                variant="secondary"
+                :disabled="logs.entries.length === 0"
+                :loading="logs.status === 'loading'"
+                @click="clickClearLogs()"
+              >
+                Clear logs
+              </UiButton>
+              <UiButton
+                variant="secondary"
+                :disabled="logs.entries.length === 0"
+                @click="showExportConfirm = true"
+              >
+                Download logs
+              </UiButton>
+            </div>
+
+            <div v-if="showExportConfirm" class="space-y-2 rounded border border-if-hairline p-3">
+              <p class="text-xs text-if-faint">
+                Confirm your vault passphrase or passkey to download the log file.
+              </p>
+
+              <UiButton
+                v-if="exportPasskeyUsable()"
+                :loading="vault.status === 'loading'"
+                @click="clickExportConfirmWithPasskey()"
+              >
+                Confirm with Passkey
+              </UiButton>
+              <form
+                v-else
+                class="space-y-2"
+                @submit.prevent="submitExportConfirmWithPassphrase"
+              >
+                <UiTextInput
+                  v-model="exportReconfirmPassphrase"
+                  type="password"
+                  placeholder="Passphrase"
+                />
+                <UiButton
+                  type="submit"
+                  :disabled="exportReconfirmPassphrase.length === 0"
+                  :loading="vault.status === 'loading'"
+                >
+                  Confirm and download
+                </UiButton>
+              </form>
+
+              <UiButton variant="secondary" @click="cancelExportConfirm()">Cancel</UiButton>
+
+              <p v-if="vault.error" class="text-xs text-red-600">{{ vault.error }}</p>
+            </div>
+
+            <p v-if="logs.error" class="text-xs text-red-600">{{ logs.error }}</p>
           </div>
         </div>
 

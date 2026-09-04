@@ -11,6 +11,7 @@
 
 import { browser } from 'wxt/browser';
 import type { CanonicalOrigin } from '../../../shared/origin';
+import { log } from '../../logging/handler';
 
 const AUTO_SAVE_NOTICE_STORAGE_KEY = 'if_auto_save_notice_v1';
 
@@ -54,7 +55,7 @@ export async function setAutoSaveNotice(origin: CanonicalOrigin): Promise<void> 
   try {
     await enqueueWrite((state) => ({ origins: { ...state.origins, [origin]: true } }));
   } catch (err) {
-    console.debug('Identity Firewall: failed to set the auto-save notice', err);
+    log('debug', 'Identity Firewall: failed to set the auto-save notice', err);
   }
 }
 

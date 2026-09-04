@@ -11,6 +11,7 @@
 import { browser } from 'wxt/browser';
 import { base64ToBytes } from '../shared/bytes';
 import { normalizeOrigin } from '../shared/origin';
+import { log } from './logging/handler';
 import { getHighTrustOrigins, getPolicies } from './policy/storage';
 import { getSessionState } from './session/state';
 import { getPendingCredential } from './vault/credentials/pendingCapture';
@@ -77,6 +78,6 @@ export async function updateBadgeForTab(tabId: number, origin: string): Promise<
     const total = askCount + (pending ? 1 : 0);
     await browser.action.setBadgeText({ tabId, text: total > 0 ? String(total) : '' });
   } catch (err) {
-    console.debug('Identity Firewall: failed to update the toolbar badge', err);
+    log('debug', 'Identity Firewall: failed to update the toolbar badge', err);
   }
 }

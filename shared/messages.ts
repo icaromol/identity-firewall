@@ -317,6 +317,34 @@ export const SetAppSettingsMessageSchema = z.object({
 });
 export type SetAppSettingsMessage = z.infer<typeof SetAppSettingsMessageSchema>;
 
+// A local, bounded dev-log (background/logging/) -- defined here, not in
+// background/logging/storage.ts, matching every other response shape in
+// this file (VaultStatusResponse, PersonalData): shared/ is the one
+// direction background/ and the frontend both import FROM, never the
+// reverse.
+export type LogLevel = 'debug' | 'error';
+export interface LogEntry {
+  timestamp: number;
+  level: LogLevel;
+  message: string;
+  // Serialized to a plain string up front -- an arbitrary Error object or
+  // response payload doesn't reliably round-trip through
+  // browser.storage.local the way a plain string does.
+  detail?: string;
+}
+
+export const GetLogsMessageSchema = z.object({
+  type: z.literal('GET_LOGS'),
+  payload: z.object({}).optional(),
+});
+export type GetLogsMessage = z.infer<typeof GetLogsMessageSchema>;
+
+export const ClearLogsMessageSchema = z.object({
+  type: z.literal('CLEAR_LOGS'),
+  payload: z.object({}).optional(),
+});
+export type ClearLogsMessage = z.infer<typeof ClearLogsMessageSchema>;
+
 // --- Popup -> Background: Credentials ---
 export const GetCredentialMessageSchema = z.object({
   type: z.literal('GET_CREDENTIAL'),
@@ -451,6 +479,8 @@ export const ExtensionMessageSchema = z.discriminatedUnion('type', [
   SetPersonalDataMessageSchema,
   GetAppSettingsMessageSchema,
   SetAppSettingsMessageSchema,
+  GetLogsMessageSchema,
+  ClearLogsMessageSchema,
   GetCredentialMessageSchema,
   SaveCredentialMessageSchema,
   DeleteCredentialMessageSchema,
@@ -603,6 +633,8 @@ export type SetPersonalDataResponse = PersonalData;
 // (background/settings/handler.ts).
 export type GetAppSettingsResponse = AppSettings;
 export type SetAppSettingsResponse = AppSettings;
+export type GetLogsResponse = LogEntry[];
+export type ClearLogsResponse = undefined;
 export type GetCredentialResponse = CredentialRecord[];
 export type SaveCredentialResponse = CredentialRecord;
 export type DeleteCredentialResponse = undefined;

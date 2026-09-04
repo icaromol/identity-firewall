@@ -24,9 +24,24 @@ export const MIN_AUTO_LOCK_SECONDS = 15;
 // in the schema -- the schema stays a plain positive-integer-or-null
 // contract; the floor is a chrome.idle implementation detail, not a rule
 // about what settings data itself is allowed to contain.
+// Adding a new required field here means any already-stored AppSettings
+// object (from before this field existed) fails validation as a whole --
+// background/settings/storage.ts's getAppSettings() falls back to
+// DEFAULT_APP_SETTINGS wholesale on any parse failure, so an existing
+// local install resets ALL of its settings (auto-lock duration included)
+// back to defaults the first time it reads storage after an update like
+// this one. Accepted deliberately, matching this project's own "no
+// compatibility layers for what's obsolete" engineering principle
+// (CLAUDE.md) -- a one-time settings reset on a schema change, not a
+// migration system, given this is a personal project with no external
+// users yet.
 export const AppSettingsSchema = z.object({
   autoLockSeconds: z.number().int().positive().nullable(),
   credentialSaveMode: CredentialSaveModeSchema,
+  // Local dev-log toggle (background/logging/) -- defaults to on. Turning
+  // it off doesn't silence the underlying console.debug/console.error
+  // calls, only whether they're also persisted to browser.storage.local.
+  logsEnabled: z.boolean(),
 });
 export type AppSettings = z.infer<typeof AppSettingsSchema>;
 
@@ -48,4 +63,5 @@ export function isAutoLockDisabled(autoLockSeconds: number | null): autoLockSeco
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   autoLockSeconds: 30,
   credentialSaveMode: 'ask',
+  logsEnabled: true,
 };
