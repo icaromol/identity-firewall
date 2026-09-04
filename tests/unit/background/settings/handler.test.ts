@@ -115,7 +115,7 @@ describe('app settings handlers', () => {
     expect(resultB).toEqual({
       autoLockSeconds: 3600,
       credentialSaveMode: 'auto',
-      logsEnabled: true,
+      logLevel: 'debug',
     });
   });
 });

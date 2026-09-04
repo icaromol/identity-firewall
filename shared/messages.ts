@@ -322,7 +322,14 @@ export type SetAppSettingsMessage = z.infer<typeof SetAppSettingsMessageSchema>;
 // this file (VaultStatusResponse, PersonalData): shared/ is the one
 // direction background/ and the frontend both import FROM, never the
 // reverse.
-export type LogLevel = 'debug' | 'error';
+//
+// Schema-first (not a bare TS union) because RECORD_LOG_ENTRY below is an
+// incoming message from a content script -- an untrusted-ish boundary
+// compared to every other log() call site, which are all developer-authored
+// strings inside background/ -- and needs real Zod validation, matching
+// every other message payload in this file.
+export const LogLevelSchema = z.enum(['debug', 'info', 'error']);
+export type LogLevel = z.infer<typeof LogLevelSchema>;
 export interface LogEntry {
   timestamp: number;
   level: LogLevel;
@@ -344,6 +351,22 @@ export const ClearLogsMessageSchema = z.object({
   payload: z.object({}).optional(),
 });
 export type ClearLogsMessage = z.infer<typeof ClearLogsMessageSchema>;
+
+// content/log.ts's reportLog() is the one way a content script (a separate
+// JS execution context that cannot import background/logging/handler.ts
+// directly) gets an event into the SAME persisted log background code
+// writes to via log(). `detail` arrives pre-serialized to a string (the
+// content script uses shared/logSerialize.ts's serializeLogDetail itself,
+// the same logic background/logging/handler.ts's own log() uses).
+export const RecordLogEntryMessageSchema = z.object({
+  type: z.literal('RECORD_LOG_ENTRY'),
+  payload: z.object({
+    level: LogLevelSchema,
+    message: z.string(),
+    detail: z.string().optional(),
+  }),
+});
+export type RecordLogEntryMessage = z.infer<typeof RecordLogEntryMessageSchema>;
 
 // --- Popup -> Background: Credentials ---
 export const GetCredentialMessageSchema = z.object({
@@ -481,6 +504,7 @@ export const ExtensionMessageSchema = z.discriminatedUnion('type', [
   SetAppSettingsMessageSchema,
   GetLogsMessageSchema,
   ClearLogsMessageSchema,
+  RecordLogEntryMessageSchema,
   GetCredentialMessageSchema,
   SaveCredentialMessageSchema,
   DeleteCredentialMessageSchema,
@@ -635,6 +659,7 @@ export type GetAppSettingsResponse = AppSettings;
 export type SetAppSettingsResponse = AppSettings;
 export type GetLogsResponse = LogEntry[];
 export type ClearLogsResponse = undefined;
+export type RecordLogEntryResponse = undefined;
 export type GetCredentialResponse = CredentialRecord[];
 export type SaveCredentialResponse = CredentialRecord;
 export type DeleteCredentialResponse = undefined;

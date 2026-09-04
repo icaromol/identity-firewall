@@ -12,6 +12,14 @@ import { z } from 'zod';
 export const CredentialSaveModeSchema = z.enum(['ask', 'auto']);
 export type CredentialSaveMode = z.infer<typeof CredentialSaveModeSchema>;
 
+// A straight verbosity ladder -- 'off' persists nothing, 'info' persists
+// coarse lifecycle events plus errors, 'debug' persists everything
+// (background/logging/handler.ts's shouldPersist() is the one place this
+// gets interpreted). Never affects console output, which background/
+// logging/handler.ts's log() always emits regardless of this setting.
+export const LogThresholdSchema = z.enum(['off', 'info', 'debug']);
+export type LogThreshold = z.infer<typeof LogThresholdSchema>;
+
 // chrome.idle.setDetectionInterval's own documented floor (confirmed
 // against MDN/Chrome's own API docs, not assumed). Lives here, not in
 // background/settings/idleLock.ts, so the one number has exactly one
@@ -38,10 +46,14 @@ export const MIN_AUTO_LOCK_SECONDS = 15;
 export const AppSettingsSchema = z.object({
   autoLockSeconds: z.number().int().positive().nullable(),
   credentialSaveMode: CredentialSaveModeSchema,
-  // Local dev-log toggle (background/logging/) -- defaults to on. Turning
-  // it off doesn't silence the underlying console.debug/console.error
-  // calls, only whether they're also persisted to browser.storage.local.
-  logsEnabled: z.boolean(),
+  // Local dev-log verbosity threshold (background/logging/) -- replaced
+  // the original boolean logsEnabled field with a 3-way LogThreshold once
+  // 'info'-level lifecycle tracing was added alongside the original
+  // 'debug'/'error' tags (see docs/plans/local-dev-log.md). Turning it
+  // down/off doesn't silence the underlying console.debug/console.error/
+  // console.info calls, only whether they're also persisted to
+  // browser.storage.local.
+  logLevel: LogThresholdSchema,
 });
 export type AppSettings = z.infer<typeof AppSettingsSchema>;
 
@@ -63,5 +75,9 @@ export function isAutoLockDisabled(autoLockSeconds: number | null): autoLockSeco
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   autoLockSeconds: 30,
   credentialSaveMode: 'ask',
-  logsEnabled: true,
+  // 'debug' (most verbose), not 'info' -- preserves the exact behavior the
+  // original logsEnabled: true default already had (persisting both
+  // levels that existed at the time). Defaulting quieter would silently
+  // hide the new per-field debug tracing this was built for.
+  logLevel: 'debug',
 };

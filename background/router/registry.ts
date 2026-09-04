@@ -13,7 +13,7 @@ import type { ExtensionMessage } from '../../shared/messages';
 import { handleGetPendingRequest, handleSubmitFieldDecisions } from '../firewall/handler';
 import { handleFormDetected, handleFormSubmitted } from '../formDetection/handler';
 import { handleCreateServiceIdentity, handleGetServiceIdentity } from '../identity/handler';
-import { handleClearLogs, handleGetLogs } from '../logging/handler';
+import { handleClearLogs, handleGetLogs, handleRecordLogEntry } from '../logging/handler';
 import {
   handleDeletePolicy,
   handleGetAllPrivacyLedger,
@@ -209,5 +209,9 @@ export const registry: Registry = {
   CLEAR_LOGS: {
     capability: 'logging',
     handle: (message) => handleClearLogs(message),
+  },
+  RECORD_LOG_ENTRY: {
+    capability: 'logging',
+    handle: (message) => handleRecordLogEntry(message),
   },
 };

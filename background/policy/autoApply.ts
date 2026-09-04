@@ -24,6 +24,7 @@ import type {
   ResponseType,
 } from '../../shared/vault-schema';
 import { generateResponseValue } from '../firewall/responseGenerator';
+import { log } from '../logging/handler';
 import { resolvePolicy } from './resolve';
 
 export interface AutoApplyResult {
@@ -88,6 +89,21 @@ export async function computeAutoApply(
       entry.field.apparentlyRequired,
     ),
   }));
+
+  // 'debug', not 'info' -- resolvePolicy runs once per recognized field,
+  // potentially several times per form; at 'info' this would drown out
+  // the coarser lifecycle events formDetection/handler.ts logs. Logged
+  // here at resolvePolicy's own call site, not inside resolvePolicy
+  // itself, which is documented pure/no-I/O logic (this file's own header
+  // comment) -- adding a log() side effect there would be a design
+  // regression nobody asked for.
+  for (const r of resolved) {
+    log('debug', 'Identity Firewall: policy resolved a field (auto-apply path)', {
+      origin,
+      fieldType: r.field.fieldType,
+      action: r.action,
+    });
+  }
 
   const askCount = resolved.filter((r) => r.action === 'ask').length;
   if (askCount > 0) {

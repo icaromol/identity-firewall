@@ -1,11 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fakeBrowser } from 'wxt/testing/fake-browser';
-import { handleClearLogs, handleGetLogs, log } from '../../../../background/logging/handler';
+import {
+  handleClearLogs,
+  handleGetLogs,
+  handleRecordLogEntry,
+  log,
+} from '../../../../background/logging/handler';
 import { setAppSettings } from '../../../../background/settings/storage';
 
 describe('logging handler', () => {
   beforeEach(() => {
     fakeBrowser.reset();
+    vi.restoreAllMocks();
   });
 
   it('log() still calls the real console method with the original arguments', () => {
@@ -37,18 +43,42 @@ describe('logging handler', () => {
     expect(entries[0]?.detail).toContain('bad input');
   });
 
-  it('does not persist when logsEnabled is false, but still logs to console', async () => {
-    await setAppSettings({ logsEnabled: false });
-    const spy = vi.spyOn(console, 'debug').mockImplementation(() => {});
+  it('logLevel "off" persists nothing, including error-tagged entries, but still consoles', async () => {
+    await setAppSettings({ logLevel: 'off' });
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-    log('debug', 'should not persist');
-    // Give the fire-and-forget persistLogEntry a tick to run (it would be
-    // a no-op regardless, but this confirms it isn't merely slow).
+    log('error', 'should not persist even though it is an error');
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(spy).toHaveBeenCalledWith('should not persist', undefined);
+    expect(spy).toHaveBeenCalledWith('should not persist even though it is an error', undefined);
     expect(await handleGetLogs({ type: 'GET_LOGS', payload: {} })).toEqual([]);
+  });
+
+  it('logLevel "info" persists info/error entries but skips debug-tagged ones', async () => {
+    await setAppSettings({ logLevel: 'info' });
+
+    log('debug', 'skipped');
+    log('info', 'kept-info');
+    log('error', 'kept-error');
+    await vi.waitFor(async () => {
+      const entries = await handleGetLogs({ type: 'GET_LOGS', payload: {} });
+      expect(entries).toHaveLength(2);
+    });
+
+    const entries = await handleGetLogs({ type: 'GET_LOGS', payload: {} });
+    expect(entries.map((e) => e.message)).toEqual(['kept-info', 'kept-error']);
+  });
+
+  it('logLevel "debug" persists every level', async () => {
+    await setAppSettings({ logLevel: 'debug' });
+
+    log('debug', 'a');
+    log('info', 'b');
+    log('error', 'c');
+    await vi.waitFor(async () => {
+      expect(await handleGetLogs({ type: 'GET_LOGS', payload: {} })).toHaveLength(3);
+    });
   });
 
   it('never throws even when the underlying storage write fails', async () => {
@@ -65,5 +95,29 @@ describe('logging handler', () => {
 
     await handleClearLogs({ type: 'CLEAR_LOGS', payload: {} });
     expect(await handleGetLogs({ type: 'GET_LOGS', payload: {} })).toEqual([]);
+  });
+
+  it('handleRecordLogEntry persists a content-script report without also consoling', async () => {
+    const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => {});
+    const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+
+    await handleRecordLogEntry({
+      type: 'RECORD_LOG_ENTRY',
+      payload: { level: 'info', message: 'content script event', detail: 'some detail' },
+    });
+
+    const entries = await handleGetLogs({ type: 'GET_LOGS', payload: {} });
+    expect(entries).toEqual([
+      expect.objectContaining({
+        level: 'info',
+        message: 'content script event',
+        detail: 'some detail',
+      }),
+    ]);
+    // The content script already consoles its own message directly (a
+    // separate console from the background service worker's) -- this
+    // handler must never console a second time.
+    expect(debugSpy).not.toHaveBeenCalled();
+    expect(infoSpy).not.toHaveBeenCalled();
   });
 });

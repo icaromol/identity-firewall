@@ -16,6 +16,7 @@ import type {
   PolicyAction,
   ResponseType,
 } from '../../shared/vault-schema';
+import { log } from '../logging/handler';
 import { recordDisclosure } from '../policy/ledger';
 import { resolvePolicy } from '../policy/resolve';
 import { getSessionState } from '../session/state';
@@ -87,6 +88,15 @@ function computeResolvedActions(
         policyContext.aliasProviderConfigured,
         field.apparentlyRequired,
       );
+      // 'debug', not 'info' -- same reasoning as autoApply.ts's own
+      // per-field policy log: this is the popup-preview path's equivalent
+      // of that same resolvePolicy call site, kept out of resolvePolicy
+      // itself for the same purity reason.
+      log('debug', 'Identity Firewall: policy resolved a field (popup path)', {
+        origin,
+        fieldType: field.fieldType,
+        action: result[field.fieldType],
+      });
     }
   }
   return result;
@@ -152,6 +162,11 @@ export async function handleSubmitFieldDecisions(
   if (!form) {
     throw new Error(`No pending request found for origin "${origin}", formIndex ${formIndex}`);
   }
+  log('info', 'Identity Firewall: firewall processing submitted field decisions', {
+    origin,
+    formIndex,
+    fieldCount: form.fields.length,
+  });
 
   const [personalData, policyContext] = await Promise.all([getPersonalData(), loadPolicyContext()]);
   const aliasProviderConfigured = policyContext.aliasProviderConfigured;
@@ -195,6 +210,19 @@ export async function handleSubmitFieldDecisions(
       normalizeOrigin(origin),
       policyContext.rootSecret,
     );
+    // SECURITY-SENSITIVE LOG CALL -- this log() call sits 6 lines from the
+    // real disclosed value (`value`, above). It must NEVER be changed to
+    // include `value` itself: this log is persisted to a plain,
+    // unencrypted, user-exportable file (ADR-019) -- logging a real
+    // PersonalData/synthetic value here would leak it into that file. Only
+    // ever log the DECISION (fieldType + responseType + whether anything
+    // was disclosed), never the VALUE.
+    log('debug', 'Identity Firewall: firewall resolved a field decision', {
+      origin,
+      fieldType: field.fieldType,
+      responseType,
+      disclosed: value !== null,
+    });
     if (value !== null) {
       resolvedValues[key] = value;
       disclosedFields[field.fieldType] = responseType;
@@ -213,6 +241,12 @@ export async function handleSubmitFieldDecisions(
   // content-script/popup -> background traffic).
   await browser.tabs.sendMessage(tabId, autofillMessage);
   await recordDisclosure(origin, requestedFields, disclosedFields, deniedFields);
+  log('info', 'Identity Firewall: firewall applied field decisions', {
+    origin,
+    formIndex,
+    disclosedCount: Object.keys(disclosedFields).length,
+    deniedCount: deniedFields.length,
+  });
 
   return { resolvedValues };
 }

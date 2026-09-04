@@ -10,6 +10,7 @@ import { normalizeOrigin } from '../../shared/origin';
 import { tryLoadAutoApplyInputs, updateBadgeForTab } from '../badge';
 import { classifyForm } from '../firewall/classifier';
 import { detectLoginForm } from '../firewall/loginDetector';
+import { log } from '../logging/handler';
 import { computeAutoApply } from '../policy/autoApply';
 import { recordDisclosure } from '../policy/ledger';
 import { recordFormDetection } from '../session/state';
@@ -30,6 +31,10 @@ export async function handleFormDetected(
 ): Promise<{ recorded: true }> {
   const { origin, forms, detectedAt } = message.payload;
   const classified = forms.map(classifyForm);
+  log('info', 'Identity Firewall: classified a detected form set', {
+    origin,
+    formCount: classified.length,
+  });
 
   const tabId = ctx.sender.tab?.id;
   const autoApplyInputs = await tryLoadAutoApplyInputs();
@@ -56,6 +61,12 @@ export async function handleFormDetected(
       isHighTrustOrigin: autoApplyInputs.isHighTrustOrigin(origin),
       aliasProviderConfigured: autoApplyInputs.aliasProviderConfigured,
       rootSecret: autoApplyInputs.rootSecret,
+    });
+    log('info', 'Identity Firewall: resolved auto-apply for a form', {
+      origin,
+      formIndex: form.formIndex,
+      fullyResolved: result.fullyResolved,
+      askCount: result.fullyResolved ? 0 : result.askCount,
     });
 
     if (!result.fullyResolved) {

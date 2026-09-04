@@ -6,6 +6,7 @@
 import { browser } from 'wxt/browser';
 import { applyAutofill } from '../content/autofill';
 import { buildFormDetectedMessage, buildFormSubmittedMessage } from '../content/formDetection';
+import { reportLog } from '../content/log';
 import type { MessageResponse } from '../shared/messages';
 import { AutofillFieldsMessageSchema } from '../shared/messages';
 
@@ -34,6 +35,10 @@ export default defineContentScript({
 
     const message = buildFormDetectedMessage(document, location.href, Date.now());
     if (message) {
+      reportLog('info', 'Identity Firewall: content script reported a form detection', {
+        origin: location.origin,
+        formCount: message.payload.forms.length,
+      });
       // Fire-and-forget: nothing in the content script can usefully retry
       // or surface a failed report to the page (Phase 1 does a single
       // document_idle pass, no re-detection -- see roadmap.md Phase 9).
@@ -83,6 +88,11 @@ export default defineContentScript({
         const submittedMessage = buildFormSubmittedMessage(event.target, formIndex, location.href);
         if (!submittedMessage) return; // no password field -- nothing this module cares about
 
+        // Builds its OWN detail object -- never passes submittedMessage.payload
+        // through, which carries the real typed password/identifier values.
+        reportLog('info', 'Identity Firewall: content script reported a form submission', {
+          formIndex,
+        });
         browser.runtime.sendMessage(submittedMessage).catch(() => {});
       },
       { capture: true },

@@ -30,6 +30,7 @@ import UiTooltip from '../../components/ui/UiTooltip.vue';
 import VaultLockedNotice from '../../components/ui/VaultLockedNotice.vue';
 // biome-ignore-end lint/correctness/noUnusedImports: used in <template>
 import type { LogEntry, LogLevel } from '../../shared/messages';
+import type { LogThreshold } from '../../shared/settings';
 import { isAutoLockDisabled } from '../../shared/settings';
 import type {
   PersonalData,
@@ -211,17 +212,24 @@ async function toggleCredentialSaveMode(): Promise<void> {
   }
 }
 
-// Mirrors toggleCredentialSaveMode's own re-entrancy guard immediately
-// above it.
-// biome-ignore lint/correctness/noUnusedVariables: called from @update:model-value in <template> -- Biome only lints the <script> block, it can't see template usage.
-async function toggleLogsEnabled(): Promise<void> {
-  if (appSettings.saving) return;
-  const next = !appSettings.data.logsEnabled;
-  await appSettings.saveAppSettings({ logsEnabled: next });
-  if (appSettings.justSaved) {
-    toast.push(next ? 'Logging enabled.' : 'Logging disabled.', 'success');
-  }
-}
+// biome-ignore lint/correctness/noUnusedVariables: read from <template> -- Biome only lints the <script> block, it can't see template usage.
+const LOG_LEVEL_OPTIONS: { value: LogThreshold; label: string }[] = [
+  { value: 'off', label: 'Off' },
+  { value: 'info', label: 'Info' },
+  { value: 'debug', label: 'Debug (verbose)' },
+];
+
+// Mirrors autoLockSelectValue's own get/set computed pattern immediately
+// above (a plain <select>, not a new component -- this file's own
+// existing precedent for a 3+-way choice).
+// biome-ignore lint/correctness/noUnusedVariables: read from <template> -- Biome only lints the <script> block, it can't see template usage.
+const logLevelSelectValue = computed<LogThreshold>({
+  get: () => appSettings.data.logLevel,
+  set: async (value: LogThreshold) => {
+    await appSettings.saveAppSettings({ logLevel: value });
+    if (appSettings.justSaved) toast.push(`Logging set to ${value}.`, 'success');
+  },
+});
 
 // Newest first (storage.ts appends oldest-to-newest) and capped well below
 // the backend's own 500-entry ring buffer -- this is a live troubleshooting
@@ -236,15 +244,23 @@ function formatLogTimestamp(timestamp: number): string {
 }
 
 // theme.css's own if-* accent colors, not Tailwind's generic red-600 --
-// tangerine for error (this app's one warm/alarm-toned accent), lagoon for
-// debug (routine, informational). Opacity-modified (`/15`) backgrounds
-// stay legible in both light and dark since if-tangerine/if-lagoon are
-// fixed brand hues, not theme-relative tokens.
+// tangerine for error (this app's one warm/alarm-toned accent), sunbeam
+// for info (notable but not alarming -- a middle rung between tangerine's
+// alarm and lagoon's routine), lagoon for debug (routine, informational,
+// and deliberately the coolest/quietest color: debug-tagged entries are
+// the highest-frequency once per-field policy logging is in the mix, so
+// the busiest row gets the calmest color). if-blue is deliberately NOT
+// reused here -- it's already this page's primary interactive-accent
+// color (active tab, primary buttons), and reusing it for a log level
+// would visually collide with that meaning. if-dahlia stays unclaimed
+// (a natural fit for a future 'warn' level). Opacity-modified (`/15`)
+// backgrounds stay legible in both themes since these are fixed brand
+// hues, not theme-relative tokens.
 // biome-ignore lint/correctness/noUnusedVariables: called from <template> -- Biome only lints the <script> block, it can't see template usage.
 function logLevelClasses(level: LogLevel): string {
-  return level === 'error'
-    ? 'bg-if-tangerine/15 text-if-tangerine'
-    : 'bg-if-lagoon/15 text-if-lagoon';
+  if (level === 'error') return 'bg-if-tangerine/15 text-if-tangerine';
+  if (level === 'info') return 'bg-if-sunbeam/15 text-if-sunbeam';
+  return 'bg-if-lagoon/15 text-if-lagoon'; // 'debug'
 }
 
 // biome-ignore lint/correctness/noUnusedVariables: called from @click in <template> -- Biome only lints the <script> block, it can't see template usage.
@@ -727,7 +743,7 @@ async function submitRestoreWithPassphrase(): Promise<void> {
       </div>
     </section>
 
-    <section v-if="activeTab === 'configuration'" class="mt-6 max-w-3xl">
+    <section v-if="activeTab === 'configuration'" class="mt-6 max-w-6xl">
       <p
         v-if="appSettings.status === 'idle' || appSettings.status === 'loading'"
         class="flex items-center gap-2 text-if-muted"
@@ -739,12 +755,16 @@ async function submitRestoreWithPassphrase(): Promise<void> {
         {{ appSettings.error }}
       </p>
 
-      <!-- Two columns: everyday preferences on the left, the Logs card as
-           its own secondary column on the right -- both still the same
-           Configuration tab, not a separate tab. Stacks to one column below
-           md, since the popup's own dashboard width is comfortably above
-           that but a narrow window shouldn't squeeze both. -->
-      <div v-else class="grid gap-4 md:grid-cols-[minmax(0,1fr)_18rem]">
+      <!-- Two columns: everyday preferences (fixed width -- toggles/labels
+           don't need to grow) on the left, the Logs card as its own
+           secondary column on the right, taking whatever width remains --
+           both still the same Configuration tab, not a separate tab. The
+           Logs column gets the growing share, not the settings column,
+           since a wider log list/detail area is the actual point of
+           widening this section. Stacks to one column below md, since the
+           popup's own dashboard width is comfortably above that but a
+           narrow window shouldn't squeeze both. -->
+      <div v-else class="grid gap-4 md:grid-cols-[20rem_minmax(0,1fr)]">
         <div class="space-y-4">
           <div class="rounded border border-if-hairline p-3">
             <label for="auto-lock-select" class="font-heading text-xs font-bold uppercase tracking-wide text-if-muted">
@@ -786,22 +806,24 @@ async function submitRestoreWithPassphrase(): Promise<void> {
           </div>
 
           <div class="rounded border border-if-hairline p-3">
-            <p class="font-heading text-xs font-bold uppercase tracking-wide text-if-muted">
+            <label for="log-level-select" class="font-heading text-xs font-bold uppercase tracking-wide text-if-muted">
               Local dev log
-            </p>
-            <div class="mt-2">
-              <UiToggle
-                :model-value="appSettings.data.logsEnabled"
-                :disabled="appSettings.saving"
-                @update:model-value="toggleLogsEnabled()"
-              >
-                <span class="text-sm text-if-navy">Enable logging</span>
-              </UiToggle>
-            </div>
+            </label>
             <p class="mt-1 text-xs text-if-faint">
-              Keeps a bounded local record of internal errors/debug events for troubleshooting.
-              Never leaves your device unless you export it in the Logs column.
+              Off: nothing is recorded. Info: high-level events (form detected, decision applied).
+              Debug: every internal step, including per-field policy decisions -- verbose. Never
+              leaves your device unless you export it in the Logs column.
             </p>
+            <select
+              id="log-level-select"
+              v-model="logLevelSelectValue"
+              :disabled="appSettings.saving"
+              class="mt-2 w-full rounded border border-if-hairline bg-if-white p-1.5 text-sm text-if-navy disabled:opacity-50"
+            >
+              <option v-for="option in LOG_LEVEL_OPTIONS" :key="option.value" :value="option.value">
+                {{ option.label }}
+              </option>
+            </select>
           </div>
 
           <div class="rounded border border-if-hairline p-3">
